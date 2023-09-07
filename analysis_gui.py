@@ -13,9 +13,90 @@ class HyperspectralAnalyzer:
 
         self.default_rgb_bands = [29, 19, 9]  # Default bands for RGB display
         self.default_stretch = 'linear'  # Default stretch for RGB display
+        self.create_main_ui()
         self.create_menu()
-        self.create_canvas()
         self.spectral_window = None 
+
+    def create_main_ui(self):
+        self.main_ui_frame = tk.Frame(self.root)
+        self.main_ui_frame.grid(row=0, column=1, sticky=tk.N + tk.S + tk.W + tk.E)  # Use grid and place it in column 1
+        self.root.grid_rowconfigure(0, weight=1)  # Allow row 0 to expand vertically with window resize
+        self.root.grid_columnconfigure(1, weight=1)  # Allow column 1 to expand horizontally with window resize
+
+        # Create canvas and place it in the main_ui_frame
+        self.create_canvas()
+
+        # Create a sub-frame for the buttons
+        self.button_frame = tk.Frame(self.main_ui_frame)
+        self.button_frame.grid(row=0, column=1, sticky=tk.N + tk.S + tk.W + tk.E)  # Use grid and place it in column 1
+        self.main_ui_frame.grid_rowconfigure(0, weight=1)  # Allow row 0 to expand vertically with window resize
+        self.main_ui_frame.grid_columnconfigure(1, weight=1)  # Allow column 1 to expand horizontally with window resize
+
+        # Create band selection options
+        self.red_band_label = tk.Label(self.button_frame, text="Red Band:")
+        self.red_band_label.grid(row=0, column=0, sticky=tk.W)
+
+        self.red_band_var = tk.StringVar()
+        self.red_band_menu = ttk.Combobox(self.button_frame, textvariable=self.red_band_var, state="readonly")
+        self.red_band_menu.grid(row=0, column=1, sticky=tk.W)
+
+        self.green_band_label = tk.Label(self.button_frame, text="Green Band:")
+        self.green_band_label.grid(row=1, column=0, sticky=tk.W)
+
+        self.green_band_var = tk.StringVar()
+        self.green_band_menu = ttk.Combobox(self.button_frame, textvariable=self.green_band_var, state="readonly")
+        self.green_band_menu.grid(row=1, column=1, sticky=tk.W)
+
+        self.blue_band_label = tk.Label(self.button_frame, text="Blue Band:")
+        self.blue_band_label.grid(row=2, column=0, sticky=tk.W)
+
+        self.blue_band_var = tk.StringVar()
+        self.blue_band_menu = ttk.Combobox(self.button_frame, textvariable=self.blue_band_var, state="readonly")
+        self.blue_band_menu.grid(row=2, column=1, sticky=tk.W)
+
+        self.apply_button = tk.Button(self.button_frame, text="Apply", command=self.update_rgb_display)
+        self.apply_button.grid(row=3, column=0, columnspan=2, sticky=tk.W)
+
+        # Create RGB stretch value options
+        self.red_stretch_label = tk.Label(self.button_frame, text="Red Stretch:")
+        self.red_stretch_label.grid(row=4, column=0, sticky=tk.W)
+
+        self.red_min_stretch_var = tk.DoubleVar(value=0.0)
+        self.red_min_stretch_entry = tk.Entry(self.button_frame, textvariable=self.red_min_stretch_var)
+        self.red_min_stretch_entry.grid(row=5, column=0, sticky=tk.W)
+
+        self.red_max_stretch_var = tk.DoubleVar(value=1.0)
+        self.red_max_stretch_entry = tk.Entry(self.button_frame, textvariable=self.red_max_stretch_var)
+        self.red_max_stretch_entry.grid(row=5, column=1, sticky=tk.W)
+
+        self.green_stretch_label = tk.Label(self.button_frame, text="Green Stretch:")
+        self.green_stretch_label.grid(row=6, column=0, sticky=tk.W)
+
+        self.green_min_stretch_var = tk.DoubleVar(value=0.0)
+        self.green_min_stretch_entry = tk.Entry(self.button_frame, textvariable=self.green_min_stretch_var)
+        self.green_min_stretch_entry.grid(row=7, column=0, sticky=tk.W)
+
+        self.green_max_stretch_var = tk.DoubleVar(value=1.0)
+        self.green_max_stretch_entry = tk.Entry(self.button_frame, textvariable=self.green_max_stretch_var)
+        self.green_max_stretch_entry.grid(row=7, column=1, sticky=tk.W)
+
+        self.blue_stretch_label = tk.Label(self.button_frame, text="Blue Stretch:")
+        self.blue_stretch_label.grid(row=8, column=0, sticky=tk.W)
+
+        self.blue_min_stretch_var = tk.DoubleVar(value=0.0)
+        self.blue_min_stretch_entry = tk.Entry(self.button_frame, textvariable=self.blue_min_stretch_var)
+        self.blue_min_stretch_entry.grid(row=9, column=0, sticky=tk.W)
+
+        self.blue_max_stretch_var = tk.DoubleVar(value=1.0)
+        self.blue_max_stretch_entry = tk.Entry(self.button_frame, textvariable=self.blue_max_stretch_var)
+        self.blue_max_stretch_entry.grid(row=9, column=1, sticky=tk.W)
+
+        self.apply_stretch_button = tk.Button(self.button_frame, text="Apply Stretch", command=self.update_rgb_display)
+        self.apply_stretch_button.grid(row=10, column=0, columnspan=2, sticky=tk.W)
+
+        # Configure rows and columns to expand with resizing
+        self.button_frame.grid_columnconfigure(0, weight=1)  # Allow column 0 to expand horizontally with window resize
+        self.button_frame.grid_columnconfigure(1, weight=1)  # Allow column 1 to expand horizontally with window resize
 
     def create_menu(self):
         menubar = tk.Menu(self.root)
@@ -32,96 +113,21 @@ class HyperspectralAnalyzer:
         hitogram_menu.add_command(label="Plot Histogram", command=self.plot_histograms)
 
     def create_canvas(self):
-        self.figure, self.ax = plt.subplots()
-        self.canvas = FigureCanvasTkAgg(self.figure, master=self.root)
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        self.figure, self.ax = plt.subplots(figsize=(4, 4))
+        self.canvas = FigureCanvasTkAgg(self.figure, master=self.main_ui_frame)
+        self.canvas.get_tk_widget().grid(row=0, column=0)  # Use grid instead of pack
+
+        # # Configure columns to expand with resizing
+        self.main_ui_frame.grid_rowconfigure(0, weight=1)  # Adjust the column number if needed
+        self.main_ui_frame.grid_columnconfigure(0, weight=1)
 
         # Bind the click event to the canvas
         self.canvas.mpl_connect('button_press_event', self.on_canvas_click)
-
-    def create_band_selection_ui(self):
-        self.band_selection_frame = tk.Frame(self.root)
-        self.band_selection_frame.pack()
-
-        self.red_band_label = tk.Label(self.band_selection_frame, text="Red Band:")
-        self.red_band_label.grid(row=0, column=0)
-        self.red_band_var = tk.StringVar()
-        self.red_band_menu = ttk.Combobox(self.band_selection_frame, textvariable=self.red_band_var, state="readonly")
-        self.red_band_menu.grid(row=0, column=1)
-
-        self.green_band_label = tk.Label(self.band_selection_frame, text="Green Band:")
-        self.green_band_label.grid(row=1, column=0)
-        self.green_band_var = tk.StringVar()
-        self.green_band_menu = ttk.Combobox(self.band_selection_frame, textvariable=self.green_band_var, state="readonly")
-        self.green_band_menu.grid(row=1, column=1)
-
-        self.blue_band_label = tk.Label(self.band_selection_frame, text="Blue Band:")
-        self.blue_band_label.grid(row=2, column=0)
-        self.blue_band_var = tk.StringVar()
-        self.blue_band_menu = ttk.Combobox(self.band_selection_frame, textvariable=self.blue_band_var, state="readonly")
-        self.blue_band_menu.grid(row=2, column=1)
-
-        self.apply_button = tk.Button(self.band_selection_frame, text="Apply", command=self.update_rgb_display)
-        self.apply_button.grid(row=3, columnspan=2)
-
-        # Configure rows and columns to expand with resizing
-        for i in range(4):  # 4 rows in total (3 entry rows and 1 button row)
-            self.band_selection_frame.grid_rowconfigure(i, weight=1)
-
-        for i in range(2):  # 2 columns in total (labels and entry fields)
-            self.band_selection_frame.grid_columnconfigure(i, weight=1)
-
-
-    def create_stretch_options_ui(self):
-        self.stretch_options_frame = tk.Frame(self.root)
-        self.stretch_options_frame.pack()
-
-        self.red_stretch_label = tk.Label(self.stretch_options_frame, text="Red Stretch:")
-        self.red_stretch_label.grid(row=3, column=0)
-        self.red_min_stretch_var = tk.DoubleVar(value=0.0)  # Default min stretch value for red
-        self.red_min_stretch_entry = tk.Entry(self.stretch_options_frame, textvariable=self.red_min_stretch_var)
-        self.red_min_stretch_entry.grid(row=3, column=1)
-
-        self.red_max_stretch_var = tk.DoubleVar(value=1.0)  # Default max stretch value for red
-        self.red_max_stretch_entry = tk.Entry(self.stretch_options_frame, textvariable=self.red_max_stretch_var)
-        self.red_max_stretch_entry.grid(row=3, column=2)
-
-        self.green_stretch_label = tk.Label(self.stretch_options_frame, text="Green Stretch:")
-        self.green_stretch_label.grid(row=4, column=0)
-        self.green_min_stretch_var = tk.DoubleVar(value=0.0)  # Default min stretch value for green
-        self.green_min_stretch_entry = tk.Entry(self.stretch_options_frame, textvariable=self.green_min_stretch_var)
-        self.green_min_stretch_entry.grid(row=4, column=1)
-
-        self.green_max_stretch_var = tk.DoubleVar(value=1.0)  # Default max stretch value for green
-        self.green_max_stretch_entry = tk.Entry(self.stretch_options_frame, textvariable=self.green_max_stretch_var)
-        self.green_max_stretch_entry.grid(row=4, column=2)
-
-        self.blue_stretch_label = tk.Label(self.stretch_options_frame, text="Blue Stretch:")
-        self.blue_stretch_label.grid(row=5, column=0)
-        self.blue_min_stretch_var = tk.DoubleVar(value=0.0)  # Default min stretch value for blue
-        self.blue_min_stretch_entry = tk.Entry(self.stretch_options_frame, textvariable=self.blue_min_stretch_var)
-        self.blue_min_stretch_entry.grid(row=5, column=1)
-
-        self.blue_max_stretch_var = tk.DoubleVar(value=1.0)  # Default max stretch value for blue
-        self.blue_max_stretch_entry = tk.Entry(self.stretch_options_frame, textvariable=self.blue_max_stretch_var)
-        self.blue_max_stretch_entry.grid(row=5, column=2)
-
-        self.apply_stretch_button = tk.Button(self.stretch_options_frame, text="Apply Stretch", command=self.update_rgb_display)
-        self.apply_stretch_button.grid(row=6, columnspan=3)
-
-        # Add this code to configure the rows for proper expansion
-        for i in range(7):  # 7 rows in total (min stretch, max stretch, and each channel)
-            self.stretch_options_frame.grid_rowconfigure(i, weight=1)
-
-        for i in range(3):  # 3 columns (labels, min entry, max entry)
-            self.stretch_options_frame.grid_columnconfigure(i, weight=1)
 
     def load_data(self):
         file_path = filedialog.askopenfilename(filetypes=[("ENVI Files", "*.hdr")])
         if file_path:
             self.data = spectral.io.envi.open(file_path)
-            self.create_band_selection_ui()
-            self.create_stretch_options_ui()
             self.populate_wavelength_menus()
             self.display_data(self.default_rgb_bands)
 
@@ -284,7 +290,6 @@ class HyperspectralAnalyzer:
                 self.spectrum = self.data[y, x, :].flatten()
                 self.spectrum = np.where(self.spectrum < 0, np.nan, self.spectrum)
                 self.spectrum = np.where(self.spectrum > 1, np.nan, self.spectrum)
-                # self.create_spectral_plot(self.data.bands.centers, self.spectrum)
                 self.update_spectral_plot()
         else:
             messagebox.showwarning("Warning", "No data loaded. Load hyperspectral data first.")
@@ -295,7 +300,10 @@ class HyperspectralAnalyzer:
             self.create_spectral_plot()
         else:
             self.spectral_line.set_ydata(self.spectrum)
-            min_y, max_y = np.nanmin(self.spectrum), np.nanmax(self.spectrum)
+            xmin, xmax = self.spectral_ax.get_xlim()
+            xmin_idx = np.argmin(np.abs(np.array(self.data.bands.centers) - xmin))
+            xmax_idx = np.argmin(np.abs(np.array(self.data.bands.centers) - xmax))
+            min_y, max_y = np.nanmin(self.spectrum[xmin_idx:xmax_idx]), np.nanmax(self.spectrum[xmin_idx:xmax_idx])
             buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
             self.spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
             self.spectral_canvas.draw()
@@ -308,10 +316,12 @@ class HyperspectralAnalyzer:
         ui_frame = tk.Frame(self.spectral_window)
         ui_frame.pack(fill=tk.X)
 
-        spectral_figure, self.spectral_ax = plt.subplots()
+        spectral_figure, self.spectral_ax = plt.subplots(figsize=(5,3))
         self.spectral_line, = self.spectral_ax.plot(self.data.bands.centers, self.spectrum)
-
-        min_y, max_y = np.nanmin(self.spectrum), np.nanmax(self.spectrum)
+        xmin, xmax = self.spectral_ax.get_xlim()
+        xmin_idx = np.argmin(np.abs(np.array(self.data.bands.centers) - xmin))
+        xmax_idx = np.argmin(np.abs(np.array(self.data.bands.centers) - xmax))
+        min_y, max_y = np.nanmin(self.spectrum[xmin_idx:xmax_idx]), np.nanmax(self.spectrum[xmin_idx:xmax_idx])
         buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
         self.spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
 
@@ -319,14 +329,13 @@ class HyperspectralAnalyzer:
         self.spectral_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
         # Add a button to reset x-axis span
-        self.reset_x_axis_button = tk.Button(self.spectral_window, text="Reset X-Axis Span", command=self.reset_x_axis_span)
-        self.reset_x_axis_button.pack()
+        self.reset_x_axis_button = tk.Button(ui_frame, text="Reset X-Axis Span", command=self.reset_x_axis_span)
+        self.reset_x_axis_button.pack(side=tk.RIGHT)
 
         # Add built-in span options to a dropdown menu
         span_options = ["Full Span", "410 - 1000 nm", "1000 - 2600 nm", "1200 - 2000 nm", "1800 - 2500 nm", "2000 - 2500 nm", "2700 - 3900 nm"]
         self.span_var = tk.StringVar()
         self.span_var.set("Full Span")  # Set the default span option
-        # span_menu = ttk.Combobox(self.spectral_window, textvariable=self.span_var, values=span_options, state="readonly")
         span_menu = ttk.Combobox(ui_frame, textvariable=self.span_var, values=span_options, state="readonly")
         span_menu.pack(side=tk.RIGHT)
 
@@ -344,6 +353,12 @@ class HyperspectralAnalyzer:
     def reset_x_axis_span(self):
         # Reset x-axis span to the default range
         self.spectral_ax.set_xlim(self.data.bands.centers[0], self.data.bands.centers[-1])
+        xmin, xmax = self.spectral_ax.get_xlim()
+        xmin_idx = np.argmin(np.abs(np.array(self.data.bands.centers) - xmin))
+        xmax_idx = np.argmin(np.abs(np.array(self.data.bands.centers) - xmax))
+        min_y, max_y = np.nanmin(self.spectrum[xmin_idx:xmax_idx]), np.nanmax(self.spectrum[xmin_idx:xmax_idx])
+        buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
+        self.spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
         self.spectral_canvas.draw()
 
     def update_x_axis_span(self, event):
