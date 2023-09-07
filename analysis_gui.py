@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from matplotlib.widgets import Cursor, SpanSelector
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import spectral
 import numpy as np
 
@@ -15,6 +15,7 @@ class HyperspectralAnalyzer:
         self.default_stretch = 'linear'  # Default stretch for RGB display
         self.create_menu()
         self.create_canvas()
+        self.spectral_window = None 
 
     def create_menu(self):
         menubar = tk.Menu(self.root)
@@ -34,6 +35,9 @@ class HyperspectralAnalyzer:
         self.figure, self.ax = plt.subplots()
         self.canvas = FigureCanvasTkAgg(self.figure, master=self.root)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # Bind the click event to the canvas
+        self.canvas.mpl_connect('button_press_event', self.on_canvas_click)
 
     def create_band_selection_ui(self):
         self.band_selection_frame = tk.Frame(self.root)
@@ -272,6 +276,120 @@ class HyperspectralAnalyzer:
         blue_selector = SpanSelector(self.hist_axes[2], self.update_blue_stretch, 'horizontal', useblit=True)
 
         self.hist_span_selectors.extend([red_selector, green_selector, blue_selector])
+
+    def on_canvas_click(self, event):
+        if hasattr(self, "data"):
+            if event.inaxes == self.ax:
+                x, y = int(event.xdata), int(event.ydata)
+                self.spectrum = self.data[y, x, :].flatten()
+                self.spectrum = np.where(self.spectrum < 0, np.nan, self.spectrum)
+                self.spectrum = np.where(self.spectrum > 1, np.nan, self.spectrum)
+                # self.create_spectral_plot(self.data.bands.centers, self.spectrum)
+                self.update_spectral_plot()
+        else:
+            messagebox.showwarning("Warning", "No data loaded. Load hyperspectral data first.")
+
+
+    def update_spectral_plot(self):
+        if self.spectral_window is None or not self.spectral_window.winfo_exists():
+            self.create_spectral_plot()
+        else:
+            self.spectral_line.set_ydata(self.spectrum)
+            min_y, max_y = np.nanmin(self.spectrum), np.nanmax(self.spectrum)
+            buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
+            self.spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
+            self.spectral_canvas.draw()
+
+    def create_spectral_plot(self):
+        self.spectral_window = tk.Toplevel(self.root)
+        self.spectral_window.title("Spectral Plot")
+        
+        # Create a frame to hold UI elements with a fixed size
+        ui_frame = tk.Frame(self.spectral_window)
+        ui_frame.pack(fill=tk.X)
+
+        spectral_figure, self.spectral_ax = plt.subplots()
+        self.spectral_line, = self.spectral_ax.plot(self.data.bands.centers, self.spectrum)
+
+        min_y, max_y = np.nanmin(self.spectrum), np.nanmax(self.spectrum)
+        buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
+        self.spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
+
+        self.spectral_canvas = FigureCanvasTkAgg(spectral_figure, master=self.spectral_window)
+        self.spectral_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # Add a button to reset x-axis span
+        self.reset_x_axis_button = tk.Button(self.spectral_window, text="Reset X-Axis Span", command=self.reset_x_axis_span)
+        self.reset_x_axis_button.pack()
+
+        # Add built-in span options to a dropdown menu
+        span_options = ["Full Span", "410 - 1000 nm", "1000 - 2600 nm", "1200 - 2000 nm", "1800 - 2500 nm", "2000 - 2500 nm", "2700 - 3900 nm"]
+        self.span_var = tk.StringVar()
+        self.span_var.set("Full Span")  # Set the default span option
+        # span_menu = ttk.Combobox(self.spectral_window, textvariable=self.span_var, values=span_options, state="readonly")
+        span_menu = ttk.Combobox(ui_frame, textvariable=self.span_var, values=span_options, state="readonly")
+        span_menu.pack(side=tk.RIGHT)
+
+        # Bind an event to update the x-axis span when a span option is selected
+        span_menu.bind("<<ComboboxSelected>>", self.update_x_axis_span)
+
+        # Create a toolbar for the spectral plot
+        toolbar = NavigationToolbar2Tk(self.spectral_canvas, self.spectral_window)
+        toolbar.update()
+        self.spectral_canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        
+        # Add span selector for x-axis
+        self.create_x_axis_span_selector(self.data.bands.centers)
+
+    def reset_x_axis_span(self):
+        # Reset x-axis span to the default range
+        self.spectral_ax.set_xlim(self.data.bands.centers[0], self.data.bands.centers[-1])
+        self.spectral_canvas.draw()
+
+    def update_x_axis_span(self, event):
+        selected_span = self.span_var.get()
+        # Map the selected span to its corresponding x-axis limits
+        span_ranges = {
+            "Full Span": (self.data.bands.centers[0], self.data.bands.centers[-1]),
+            "410 - 1000 nm": (410, 1000),
+            "1000 - 2600 nm": (1000, 2600),
+            "1200 - 2000 nm": (1200, 2000),
+            "1800 - 2500 nm": (1800, 2500),
+            "2000 - 2500 nm": (2000, 2500),
+            "2700 - 3900 nm": (2700, 3900)
+        }
+        if selected_span in span_ranges:
+            xlim = span_ranges[selected_span]
+            self.spectral_ax.set_xlim(xlim[0], xlim[1])
+            xmin_idx = np.argmin(np.abs(np.array(self.data.bands.centers) - xlim[0]))
+            xmax_idx = np.argmin(np.abs(np.array(self.data.bands.centers) - xlim[1]))
+
+            # Calculate y-limits based on the data within the new span
+            y_min = np.nanmin(self.spectrum[xmin_idx:xmax_idx])
+            y_max = np.nanmax(self.spectrum[xmin_idx:xmax_idx])
+
+            buffer = (y_max - y_min) * 0.1  # Add a buffer to y-limits
+            self.spectral_ax.set_ylim(y_min - buffer, y_max + buffer)
+
+            self.spectral_canvas.draw()
+
+    def create_x_axis_span_selector(self, x_data):
+        def on_x_span_select(xmin, xmax):
+            xmin_idx = np.argmin(np.abs(x_data - xmin))
+            xmax_idx = np.argmin(np.abs(x_data - xmax))
+            self.spectral_ax.set_xlim(x_data[xmin_idx], x_data[xmax_idx])
+
+            # Calculate y-limits based on the data within the new span
+            y_min = np.nanmin(self.spectrum[xmin_idx:xmax_idx])
+            y_max = np.nanmax(self.spectrum[xmin_idx:xmax_idx])
+
+            buffer = (y_max - y_min) * 0.1  # Add a buffer to y-limits
+            self.spectral_ax.set_ylim(y_min - buffer, y_max + buffer)
+
+            self.spectral_canvas.draw()
+
+        self.x_span_selector = SpanSelector(
+            self.spectral_ax, on_x_span_select, 'horizontal', useblit=True)
 
 
 if __name__ == "__main__":
