@@ -3,6 +3,7 @@ from tkinter import filedialog, messagebox, ttk
 from matplotlib.widgets import Cursor, SpanSelector
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+from matplotlib.backend_bases import PickEvent
 import spectral
 import numpy as np
 
@@ -25,6 +26,9 @@ class HyperspectralAnalyzer:
         self.spectral_window = None 
         self.right_hist_window = None
         self.left_hist_window = None
+        self.dragging = False
+        self.drag_start_x = None
+        self.drag_start_y = None
 
     def create_main_ui(self):
         '''
@@ -187,8 +191,8 @@ class HyperspectralAnalyzer:
 
         file_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Load Left Frame Data", command=self.load_left_data)
-        file_menu.add_command(label="Load Right Frame Data", command=self.load_right_data)
+        file_menu.add_command(label="Load Hyperspectral Cube", command=self.load_left_data)
+        file_menu.add_command(label="Load Band Parameter Image", command=self.load_right_data)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.root.quit)
         
@@ -208,7 +212,10 @@ class HyperspectralAnalyzer:
 
         # Bind the click event to the canvas
         self.left_canvas.mpl_connect('button_press_event', self.on_left_canvas_click)
-    
+        self.left_canvas.mpl_connect('scroll_event', self.on_scroll)
+        self.left_canvas.mpl_connect('button_release_event', self.on_canvas_release)
+        self.left_canvas.mpl_connect('motion_notify_event', self.on_canvas_motion)
+
     def create_right_canvas(self):
         self.right_figure, self.right_ax = plt.subplots(figsize=(3, 3))
         self.right_canvas = FigureCanvasTkAgg(self.right_figure, master=self.main_ui_frame)
@@ -220,6 +227,9 @@ class HyperspectralAnalyzer:
 
         # Bind the click event to the canvas
         self.right_canvas.mpl_connect('button_press_event', self.on_left_canvas_click)
+        self.right_canvas.mpl_connect('scroll_event', self.on_scroll)
+        self.left_canvas.mpl_connect('button_release_event', self.on_canvas_release)
+        self.left_canvas.mpl_connect('motion_notify_event', self.on_canvas_motion)
 
     def load_left_data(self):
         file_path = filedialog.askopenfilename(filetypes=[("ENVI Files", "*.hdr")])
@@ -316,7 +326,6 @@ class HyperspectralAnalyzer:
 
         self.right_ax.imshow(np.array(right_rgb_image))
         self.right_canvas.draw()
-
 
     def stretch_band(self, band, stretch_range):
         min_val, max_val = stretch_range
@@ -576,20 +585,143 @@ class HyperspectralAnalyzer:
 
     def on_left_canvas_click(self, event):
         if hasattr(self, "left_data"):
-            if event.inaxes == self.left_ax:
-                x, y = int(event.xdata), int(event.ydata)
-                self.spectrum = self.left_data[y, x, :].flatten()
-                self.spectrum = np.where(self.spectrum < 0, np.nan, self.spectrum)
-                self.spectrum = np.where(self.spectrum > 1, np.nan, self.spectrum)
-                self.update_spectral_plot()
-            if event.inaxes == self.right_ax:
-                x, y = int(event.xdata), int(event.ydata)
-                self.spectrum = self.left_data[y, x, :].flatten()
-                self.spectrum = np.where(self.spectrum < 0, np.nan, self.spectrum)
-                self.spectrum = np.where(self.spectrum > 1, np.nan, self.spectrum)
-                self.update_spectral_plot()
+            if event.inaxes == self.left_ax or event.inaxes == self.right_ax:
+                if event.button == 1: #left mouse button press
+                    if not self.dragging:
+                        # single click for plotting spectra
+                        x, y = int(event.xdata), int(event.ydata)
+                        self.spectrum = self.left_data[y, x, :].flatten()
+                        self.spectrum = np.where(self.spectrum < 0, np.nan, self.spectrum)
+                        self.spectrum = np.where(self.spectrum > 1, np.nan, self.spectrum)
+                        self.update_spectral_plot()
+                    elif self.drag_start_x is not None and self.drag_start_y is not None:
+                        # Click-and-drag (for navigation)
+                        dx = event.xdata - self.drag_start_x
+                        dy = event.ydata - self.drag_start_y
+                        xlim = self.left_ax.get_xlim()
+                        ylim = self.left_ax.get_ylim()
+                        self.left_ax.set_xlim(xlim[0] - dx, xlim[1] - dx)
+                        self.left_ax.set_ylim(ylim[0] - dy, ylim[1] - dy)
+                        self.right_ax.set_xlim(xlim[0] - dx, xlim[1] - dx)
+                        self.right_ax.set_ylim(ylim[0] - dy, ylim[1] - dy)
+                        self.left_canvas.draw()
+                        self.right_canvas.draw()
+                # Set the dragging flag and initial position when the left mouse button is pressed
+                self.dragging = True
+                self.drag_start_x = event.xdata
+                self.drag_start_y = event.ydata
+        elif event.button == 3:  # Right mouse button press
+            # Implement additional functionality if needed
+            pass
         else:
             messagebox.showwarning("Warning", "No data loaded. Load hyperspectral data first into left frame.")
+
+    def on_canvas_release(self, event):
+        if self.dragging:
+            self.dragging = False
+
+    def on_canvas_motion(self, event):
+        if self.dragging:
+            if self.drag_start_x is not None and self.drag_start_y is not None:
+                dx = event.xdata - self.drag_start_x
+                dy = event.ydata - self.drag_start_y
+                self.drag_start_x = event.xdata
+                self.drag_start_y = event.ydata
+
+                # Adjust the axis limits to pan the image
+                xlim = self.left_ax.get_xlim()
+                ylim = self.left_ax.get_ylim()
+                self.left_ax.set_xlim(xlim[0] - dx, xlim[1] - dx)
+                self.left_ax.set_ylim(ylim[0] - dy, ylim[1] - dy)
+                self.right_ax.set_xlim(xlim[0] - dx, xlim[1] - dx)
+                self.right_ax.set_ylim(ylim[0] - dy, ylim[1] - dy)
+
+                self.left_canvas.draw()
+                self.right_canvas.draw()
+                
+    def on_scroll(self, event):
+        if hasattr(self, "left_data") and not hasattr(self, "right_data"):
+            if event.inaxes == self.left_ax:
+                x_data, y_data = event.xdata, event.ydata
+                x_lim, y_lim = self.left_ax.get_xlim(), self.left_ax.get_ylim()
+                
+                # Define the zoom factor (adjust as needed)
+                zoom_factor = 1.1 if event.button == 'down' else 1 / 1.1  # Zoom in or out
+
+                # Adjust the axis limits centered on the mouse cursor position
+                new_x_lim = [x_data - (x_data - x_lim[0]) * zoom_factor, x_data + (x_lim[1] - x_data) * zoom_factor]
+                new_y_lim = [y_data - (y_data - y_lim[0]) * zoom_factor, y_data + (y_lim[1] - y_data) * zoom_factor]
+                
+                self.left_ax.set_xlim(new_x_lim)
+                self.left_ax.set_ylim(new_y_lim)
+                
+                event.canvas.draw()
+        if hasattr(self, "right_data") and not hasattr(self, "left_data"):
+            if event.inaxes == self.right_ax:
+                x_data, y_data = event.xdata, event.ydata
+                x_lim, y_lim = self.right_ax.get_xlim(), self.right_ax.get_ylim()
+                
+                # Define the zoom factor (adjust as needed)
+                zoom_factor = 1.1 if event.button == 'down' else 1 / 1.1  # Zoom in or out
+
+                # Adjust the axis limits centered on the mouse cursor position
+                new_x_lim = [x_data - (x_data - x_lim[0]) * zoom_factor, x_data + (x_lim[1] - x_data) * zoom_factor]
+                new_y_lim = [y_data - (y_data - y_lim[0]) * zoom_factor, y_data + (y_lim[1] - y_data) * zoom_factor]
+                
+                self.right_ax.set_xlim(new_x_lim)
+                self.right_ax.set_ylim(new_y_lim)
+                
+                event.canvas.draw()
+        if hasattr(self, "right_data") and hasattr(self, "left_data"):
+            if event.inaxes == self.right_ax:
+                # left axis adjust
+                x_data, y_data = event.xdata, event.ydata
+                x_lim, y_lim = self.left_ax.get_xlim(), self.left_ax.get_ylim()
+                
+                # Define the zoom factor (adjust as needed)
+                zoom_factor = 1.1 if event.button == 'down' else 1 / 1.1  # Zoom in or out
+
+                # Adjust the axis limits centered on the mouse cursor position
+                new_x_lim = [x_data - (x_data - x_lim[0]) * zoom_factor, x_data + (x_lim[1] - x_data) * zoom_factor]
+                new_y_lim = [y_data - (y_data - y_lim[0]) * zoom_factor, y_data + (y_lim[1] - y_data) * zoom_factor]
+                
+                self.left_ax.set_xlim(new_x_lim)
+                self.left_ax.set_ylim(new_y_lim)
+                self.right_ax.set_xlim(new_x_lim)
+                self.right_ax.set_ylim(new_y_lim)
+                
+                event.canvas.draw()
+                self.left_canvas.draw()
+            elif event.inaxes == self.left_ax:
+                # left axis adjust
+                x_data, y_data = event.xdata, event.ydata
+                x_lim, y_lim = self.left_ax.get_xlim(), self.left_ax.get_ylim()
+                
+                # Define the zoom factor (adjust as needed)
+                zoom_factor = 1.1 if event.button == 'down' else 1 / 1.1  # Zoom in or out
+
+                # Adjust the axis limits centered on the mouse cursor position
+                new_x_lim = [x_data - (x_data - x_lim[0]) * zoom_factor, x_data + (x_lim[1] - x_data) * zoom_factor]
+                new_y_lim = [y_data - (y_data - y_lim[0]) * zoom_factor, y_data + (y_lim[1] - y_data) * zoom_factor]
+                
+                self.left_ax.set_xlim(new_x_lim)
+                self.left_ax.set_ylim(new_y_lim)
+
+                # right axis adjust
+                x_lim, y_lim = self.right_ax.get_xlim(), self.right_ax.get_ylim()
+                
+                # Define the zoom factor (adjust as needed)
+                zoom_factor = 1.1 if event.button == 'down' else 1 / 1.1  # Zoom in or out
+
+                # Adjust the axis limits centered on the mouse cursor position
+                new_x_lim = [x_data - (x_data - x_lim[0]) * zoom_factor, x_data + (x_lim[1] - x_data) * zoom_factor]
+                new_y_lim = [y_data - (y_data - y_lim[0]) * zoom_factor, y_data + (y_lim[1] - y_data) * zoom_factor]
+                
+                self.right_ax.set_xlim(new_x_lim)
+                self.right_ax.set_ylim(new_y_lim)
+                
+                event.canvas.draw()
+                self.right_canvas.draw()
 
     def update_spectral_plot(self):
         if self.spectral_window is None or not self.spectral_window.winfo_exists():
@@ -701,7 +833,6 @@ class HyperspectralAnalyzer:
 
         self.x_span_selector = SpanSelector(
             self.spectral_ax, on_x_span_select, 'horizontal', useblit=True)
-
 
 if __name__ == "__main__":
     root = tk.Tk()
