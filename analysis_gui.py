@@ -228,8 +228,8 @@ class HyperspectralAnalyzer:
         # Bind the click event to the canvas
         self.right_canvas.mpl_connect('button_press_event', self.on_left_canvas_click)
         self.right_canvas.mpl_connect('scroll_event', self.on_scroll)
-        self.left_canvas.mpl_connect('button_release_event', self.on_canvas_release)
-        self.left_canvas.mpl_connect('motion_notify_event', self.on_canvas_motion)
+        self.right_canvas.mpl_connect('button_release_event', self.on_canvas_release)
+        self.right_canvas.mpl_connect('motion_notify_event', self.on_canvas_motion)
 
     def load_left_data(self):
         file_path = filedialog.askopenfilename(filetypes=[("ENVI Files", "*.hdr")])
@@ -443,14 +443,14 @@ class HyperspectralAnalyzer:
         left_min_value, left_max_value, left_red_band, left_green_band, left_blue_band = hist_args
         self.left_hist_window = tk.Toplevel(self.root)
         self.left_hist_window.title("Hyperspectral Image Histogram")
-        self.left_hist_window.geometry("800x600")
+        self.left_hist_window.geometry("600x800")
         
         # Create a frame to hold UI elements with a fixed size
         left_hist_ui_frame = tk.Frame(self.left_hist_window)
         left_hist_ui_frame.pack(fill=tk.X)
 
         # Create a new histogram plot window if it doesn't exist
-        self.left_hist_figure, self.left_hist_axes = plt.subplots(3, 1, figsize=(3, 5))
+        self.left_hist_figure, self.left_hist_axes = plt.subplots(3, 1, figsize=(4, 6))
 
         self.left_hist_canvas = FigureCanvasTkAgg(self.left_hist_figure, master=self.left_hist_window)
         self.left_hist_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
@@ -473,20 +473,25 @@ class HyperspectralAnalyzer:
         self.left_hist_axes[2].legend()
             
         # Add spacing between subplots
-        self.left_hist_figure.subplots_adjust(hspace=0.4)
+        self.left_hist_figure.subplots_adjust(hspace=0.8)
+
+        # Create a toolbar for the spectral plot
+        left_hist_toolbar = NavigationToolbar2Tk(self.left_hist_canvas, self.left_hist_window)
+        left_hist_toolbar.update()
+        self.left_hist_canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
     def create_right_histogram(self, hist_args):
         right_min_value, right_max_value, right_red_band, right_green_band, right_blue_band = hist_args
         self.right_hist_window = tk.Toplevel(self.root)
         self.right_hist_window.title("Band Parameter Histogram")
-        # self.right_hist_window.geometry("800x600")
+        # self.right_hist_window.geometry("600x800")
 
         # Create a frame to hold UI elements with a fixed size
         right_hist_ui_frame = tk.Frame(self.right_hist_window)
         right_hist_ui_frame.pack(fill=tk.X)
 
         # Create a new histogram plot window if it doesn't exist
-        self.right_hist_figure, self.right_hist_axes = plt.subplots(3, 1, figsize=(3, 5))
+        self.right_hist_figure, self.right_hist_axes = plt.subplots(3, 1, figsize=(5, 6))
 
         self.right_hist_canvas = FigureCanvasTkAgg(self.right_hist_figure, master=self.right_hist_window)
         self.right_hist_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
@@ -497,19 +502,24 @@ class HyperspectralAnalyzer:
 
         # Create the subplots within the figure
         self.right_hist_axes[0].hist([], bins=256, color='red', alpha=0.7, range=(right_min_value, right_max_value))
-        self.right_hist_axes[0].set_title(f'Right Red Channel Histogram: {right_red_band}')
+        self.right_hist_axes[0].set_title(f'Right Red Channel Histogram: {right_red_band}', fontsize=4)
         self.right_hist_axes[0].legend()
 
         self.right_hist_axes[1].hist([], bins=256, color='green', alpha=0.7, range=(right_min_value, right_max_value))
-        self.right_hist_axes[1].set_title(f'Right Green Channel Histogram: {right_green_band}')
+        self.right_hist_axes[1].set_title(f'Right Green Channel Histogram: {right_green_band}', fontsize=4)
         self.right_hist_axes[1].legend()
 
         self.right_hist_axes[2].hist([], bins=256, color='blue', alpha=0.7, range=(right_min_value, right_max_value))
-        self.right_hist_axes[2].set_title(f'Right Blue Channel Histogram: {right_blue_band}')
+        self.right_hist_axes[2].set_title(f'Right Blue Channel Histogram: {right_blue_band}', fontsize=4)
         self.right_hist_axes[2].legend()
             
         # Add spacing between subplots
-        self.right_hist_figure.subplots_adjust(hspace=0.4)
+        self.right_hist_figure.subplots_adjust(hspace=0.8)
+
+        # Create a toolbar for the spectral plot
+        right_hist_toolbar = NavigationToolbar2Tk(self.right_hist_canvas, self.right_hist_window)
+        right_hist_toolbar.update()
+        self.right_hist_canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
     def update_left_red_stretch(self, val_min, val_max):
         self.left_red_min_stretch_var.set(val_min)
@@ -587,6 +597,8 @@ class HyperspectralAnalyzer:
         if hasattr(self, "left_data"):
             if event.inaxes == self.left_ax or event.inaxes == self.right_ax:
                 if event.button == 1: #left mouse button press
+                    self.drag_start_x = event.xdata
+                    self.drag_start_y = event.ydata
                     if not self.dragging:
                         # single click for plotting spectra
                         x, y = int(event.xdata), int(event.ydata)
@@ -594,22 +606,7 @@ class HyperspectralAnalyzer:
                         self.spectrum = np.where(self.spectrum < 0, np.nan, self.spectrum)
                         self.spectrum = np.where(self.spectrum > 1, np.nan, self.spectrum)
                         self.update_spectral_plot()
-                    elif self.drag_start_x is not None and self.drag_start_y is not None:
-                        # Click-and-drag (for navigation)
-                        dx = event.xdata - self.drag_start_x
-                        dy = event.ydata - self.drag_start_y
-                        xlim = self.left_ax.get_xlim()
-                        ylim = self.left_ax.get_ylim()
-                        self.left_ax.set_xlim(xlim[0] - dx, xlim[1] - dx)
-                        self.left_ax.set_ylim(ylim[0] - dy, ylim[1] - dy)
-                        self.right_ax.set_xlim(xlim[0] - dx, xlim[1] - dx)
-                        self.right_ax.set_ylim(ylim[0] - dy, ylim[1] - dy)
-                        self.left_canvas.draw()
-                        self.right_canvas.draw()
-                # Set the dragging flag and initial position when the left mouse button is pressed
-                self.dragging = True
-                self.drag_start_x = event.xdata
-                self.drag_start_y = event.ydata
+                    self.dragging = True
         elif event.button == 3:  # Right mouse button press
             # Implement additional functionality if needed
             pass
@@ -619,6 +616,8 @@ class HyperspectralAnalyzer:
     def on_canvas_release(self, event):
         if self.dragging:
             self.dragging = False
+            self.left_canvas.draw()
+            self.right_canvas.draw()
 
     def on_canvas_motion(self, event):
         if self.dragging:
