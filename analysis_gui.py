@@ -7,7 +7,13 @@ import spectral
 import numpy as np
 
 class HyperspectralAnalyzer:
+    '''
+    This class creates a GUI for analyzing hyperspectral data. It allows the user to load a hyperspectral and analyze an image 
+    '''
     def __init__(self, root):
+        '''
+        Initializes the GUI and creates the main UI elements.
+        '''
         self.root = root
         self.root.title("Hyperspectral Image Analyzer")
 
@@ -18,6 +24,10 @@ class HyperspectralAnalyzer:
         self.spectral_window = None 
 
     def create_main_ui(self):
+        '''
+        Creates the main UI elements for the application.
+        '''
+        # Create a frame to hold UI elements with a fixed size
         self.main_ui_frame = tk.Frame(self.root)
         self.main_ui_frame.grid(row=0, column=1, sticky=tk.N + tk.S + tk.W + tk.E)  # Use grid and place it in column 1
         self.root.grid_rowconfigure(0, weight=1)  # Allow row 0 to expand vertically with window resize
