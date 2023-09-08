@@ -24,6 +24,7 @@ class HyperspectralAnalyzer:
         self.create_main_ui()
         self.create_menu()
         self.spectral_window = None 
+        self.ratio_spectral_window = None 
         self.right_hist_window = None
         self.left_hist_window = None
         self.dragging = False
@@ -203,6 +204,8 @@ class HyperspectralAnalyzer:
 
     def create_left_canvas(self):
         self.left_figure, self.left_ax = plt.subplots(figsize=(3, 3))
+        self.left_ax.set_title("Hyperspectral Cube", fontsize= 8)
+        self.left_ax.tick_params(axis='both', which='major', labelsize=8)
         self.left_canvas = FigureCanvasTkAgg(self.left_figure, master=self.main_ui_frame)
         self.left_canvas.get_tk_widget().grid(row=0, column=0)  # Use grid instead of pack
 
@@ -218,6 +221,8 @@ class HyperspectralAnalyzer:
 
     def create_right_canvas(self):
         self.right_figure, self.right_ax = plt.subplots(figsize=(3, 3))
+        self.right_ax.set_title('Band Parameter Image', fontsize=8)
+        self.right_ax.tick_params(axis='both', which='major', labelsize=8)
         self.right_canvas = FigureCanvasTkAgg(self.right_figure, master=self.main_ui_frame)
         self.right_canvas.get_tk_widget().grid(row=0, column=1)
 
@@ -409,21 +414,21 @@ class HyperspectralAnalyzer:
 
             # Update the data in the existing subplots
             self.right_hist_axes[0].cla()
-            self.right_hist_axes[0].hist(right_red_channel.ravel(), bins=256, color='red', alpha=0.7, range=(right_min_value, right_max_value))
+            self.right_hist_axes[0].hist(right_red_channel.ravel(), bins=256, color='red', alpha=0.7, range=(self.right_red_min_stretch_var.get()*0.8, self.right_red_max_stretch_var.get()*1.2))
             self.right_hist_axes[0].axvline(self.right_red_min_stretch_var.get(), color='red', linestyle='--', label='Min Stretch')
             self.right_hist_axes[0].axvline(self.right_red_max_stretch_var.get(), color='red', linestyle='--', label='Max Stretch')
             self.right_hist_axes[0].set_title(f'Right Red Channel Histogram: {right_red_band}')
             # self.right_hist_axes[0].legend()
 
             self.right_hist_axes[1].cla()
-            self.right_hist_axes[1].hist(right_green_channel.ravel(), bins=256, color='green', alpha=0.7, range=(right_min_value, right_max_value))
+            self.right_hist_axes[1].hist(right_green_channel.ravel(), bins=256, color='green', alpha=0.7, range=(self.right_green_min_stretch_var.get()*0.8, self.right_green_max_stretch_var.get()*1.2))
             self.right_hist_axes[1].axvline(self.right_green_min_stretch_var.get(), color='green', linestyle='--', label='Min Stretch')
             self.right_hist_axes[1].axvline(self.right_green_max_stretch_var.get(), color='green', linestyle='--', label='Max Stretch')
             self.right_hist_axes[1].set_title(f'Right Green Channel Histogram: {right_green_band}')
             # self.right_hist_axes[1].legend()
 
             self.right_hist_axes[2].cla()
-            self.right_hist_axes[2].hist(right_blue_channel.ravel(), bins=256, color='blue', alpha=0.7, range=(right_min_value, right_max_value))
+            self.right_hist_axes[2].hist(right_blue_channel.ravel(), bins=256, color='blue', alpha=0.7, range=(self.right_blue_min_stretch_var.get()*0.8, self.right_blue_max_stretch_var.get()*1.2))
             self.right_hist_axes[2].axvline(self.right_blue_min_stretch_var.get(), color='blue', linestyle='--', label='Min Stretch')
             self.right_hist_axes[2].axvline(self.right_blue_max_stretch_var.get(), color='blue', linestyle='--', label='Max Stretch')
             self.right_hist_axes[2].set_title(f'Right Blue Channel Histogram: {right_blue_band}')
@@ -607,9 +612,15 @@ class HyperspectralAnalyzer:
                         self.spectrum = np.where(self.spectrum > 1, np.nan, self.spectrum)
                         self.update_spectral_plot()
                     self.dragging = True
-        elif event.button == 3:  # Right mouse button press
-            # Implement additional functionality if needed
-            pass
+                elif event.button == 3:  # Right mouse button press
+                    if hasattr(self, 'spectrum'):
+                        # plot ratio spectra
+                        x, y = int(event.xdata), int(event.ydata)
+                        self.denom_spectrum = self.left_data[y, x, :].flatten()
+                        self.denom_spectrum = np.where(self.denom_spectrum < 0, np.nan, self.denom_spectrum)
+                        self.denom_spectrum = np.where(self.denom_spectrum > 1, np.nan, self.denom_spectrum)
+                        self.ratio_spectrum = self.spectrum / self.denom_spectrum
+                        self.update_ratio_spectral_plot()
         else:
             messagebox.showwarning("Warning", "No data loaded. Load hyperspectral data first into left frame.")
 
@@ -777,6 +788,61 @@ class HyperspectralAnalyzer:
         # Add span selector for x-axis
         self.create_x_axis_span_selector(self.left_data.bands.centers)
 
+    def update_ratio_spectral_plot(self):
+        if self.ratio_spectral_window is None or not self.ratio_spectral_window.winfo_exists():
+            self.create_ratio_spectral_plot()
+        else:
+            self.ratio_spectral_line.set_ydata(self.ratio_spectrum)
+            xmin, xmax = self.ratio_spectral_ax.get_xlim()
+            xmin_idx = np.argmin(np.abs(np.array(self.left_data.bands.centers) - xmin))
+            xmax_idx = np.argmin(np.abs(np.array(self.left_data.bands.centers) - xmax))
+            min_y, max_y = np.nanmin(self.ratio_spectrum[xmin_idx:xmax_idx]), np.nanmax(self.ratio_spectrum[xmin_idx:xmax_idx])
+            buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
+            self.ratio_spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
+            self.ratio_spectral_canvas.draw()
+
+    def create_ratio_spectral_plot(self):
+        self.ratio_spectral_window = tk.Toplevel(self.root)
+        self.ratio_spectral_window.title("Ratio Spectral Plot")
+        
+        # Create a frame to hold UI elements with a fixed size
+        ratio_ui_frame = tk.Frame(self.ratio_spectral_window)
+        ratio_ui_frame.pack(fill=tk.X)
+
+        ratio_spectral_figure, self.ratio_spectral_ax = plt.subplots(figsize=(5,3))
+        self.ratio_spectral_line, = self.ratio_spectral_ax.plot(self.left_data.bands.centers, self.ratio_spectrum)
+        xmin, xmax = self.ratio_spectral_ax.get_xlim()
+        xmin_idx = np.argmin(np.abs(np.array(self.left_data.bands.centers) - xmin))
+        xmax_idx = np.argmin(np.abs(np.array(self.left_data.bands.centers) - xmax))
+        min_y, max_y = np.nanmin(self.ratio_spectrum[xmin_idx:xmax_idx]), np.nanmax(self.ratio_spectrum[xmin_idx:xmax_idx])
+        buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
+        self.ratio_spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
+
+        self.ratio_spectral_canvas = FigureCanvasTkAgg(ratio_spectral_figure, master=self.ratio_spectral_window)
+        self.ratio_spectral_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # Add a button to reset x-axis span
+        self.reset_ratio_x_axis_button = tk.Button(ratio_ui_frame, text="Reset X-Axis Span", command=self.reset_ratio_x_axis_span)
+        self.reset_ratio_x_axis_button.pack(side=tk.RIGHT)
+
+        # Add built-in span options to a dropdown menu
+        span_options = ["Full Span", "410 - 1000 nm", "1000 - 2600 nm", "1200 - 2000 nm", "1800 - 2500 nm", "2000 - 2500 nm", "2700 - 3900 nm"]
+        self.ratio_span_var = tk.StringVar()
+        self.ratio_span_var.set("Full Span")  # Set the default span option
+        span_menu = ttk.Combobox(ratio_ui_frame, textvariable=self.ratio_span_var, values=span_options, state="readonly")
+        span_menu.pack(side=tk.RIGHT)
+
+        # Bind an event to update the x-axis span when a span option is selected
+        span_menu.bind("<<ComboboxSelected>>", self.update_ratio_x_axis_span)
+
+        # Create a toolbar for the spectral plot
+        toolbar = NavigationToolbar2Tk(self.ratio_spectral_canvas, self.ratio_spectral_window)
+        toolbar.update()
+        self.ratio_spectral_canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        
+        # Add span selector for x-axis
+        self.create_ratio_x_axis_span_selector(self.left_data.bands.centers)
+
     def reset_x_axis_span(self):
         # Reset x-axis span to the default range
         self.spectral_ax.set_xlim(self.left_data.bands.centers[0], self.left_data.bands.centers[-1])
@@ -787,6 +853,17 @@ class HyperspectralAnalyzer:
         buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
         self.spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
         self.spectral_canvas.draw()
+
+    def reset_ratio_x_axis_span(self):
+        # Reset x-axis span to the default range
+        self.ratio_spectral_ax.set_xlim(self.left_data.bands.centers[0], self.left_data.bands.centers[-1])
+        xmin, xmax = self.ratio_spectral_ax.get_xlim()
+        xmin_idx = np.argmin(np.abs(np.array(self.left_data.bands.centers) - xmin))
+        xmax_idx = np.argmin(np.abs(np.array(self.left_data.bands.centers) - xmax))
+        min_y, max_y = np.nanmin(self.ratio_spectrum[xmin_idx:xmax_idx]), np.nanmax(self.ratio_spectrum[xmin_idx:xmax_idx])
+        buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
+        self.ratio_spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
+        self.ratio_spectral_canvas.draw()
 
     def update_x_axis_span(self, event):
         selected_span = self.span_var.get()
@@ -815,6 +892,33 @@ class HyperspectralAnalyzer:
 
             self.spectral_canvas.draw()
 
+    def update_ratio_x_axis_span(self, event):
+        selected_span = self.ratio_span_var.get()
+        # Map the selected span to its corresponding x-axis limits
+        span_ranges = {
+            "Full Span": (self.left_data.bands.centers[0], self.left_data.bands.centers[-1]),
+            "410 - 1000 nm": (410, 1000),
+            "1000 - 2600 nm": (1000, 2600),
+            "1200 - 2000 nm": (1200, 2000),
+            "1800 - 2500 nm": (1800, 2500),
+            "2000 - 2500 nm": (2000, 2500),
+            "2700 - 3900 nm": (2700, 3900)
+        }
+        if selected_span in span_ranges:
+            xlim = span_ranges[selected_span]
+            self.ratio_spectral_ax.set_xlim(xlim[0], xlim[1])
+            xmin_idx = np.argmin(np.abs(np.array(self.left_data.bands.centers) - xlim[0]))
+            xmax_idx = np.argmin(np.abs(np.array(self.left_data.bands.centers) - xlim[1]))
+
+            # Calculate y-limits based on the data within the new span
+            y_min = np.nanmin(self.ratio_spectrum[xmin_idx:xmax_idx])
+            y_max = np.nanmax(self.ratio_spectrum[xmin_idx:xmax_idx])
+
+            buffer = (y_max - y_min) * 0.1  # Add a buffer to y-limits
+            self.ratio_spectral_ax.set_ylim(y_min - buffer, y_max + buffer)
+
+            self.ratio_spectral_canvas.draw()
+
     def create_x_axis_span_selector(self, x_data):
         def on_x_span_select(xmin, xmax):
             xmin_idx = np.argmin(np.abs(x_data - xmin))
@@ -832,6 +936,25 @@ class HyperspectralAnalyzer:
 
         self.x_span_selector = SpanSelector(
             self.spectral_ax, on_x_span_select, 'horizontal', useblit=True)
+
+    def create_ratio_x_axis_span_selector(self, x_data):
+        def on_x_span_select(xmin, xmax):
+            xmin_idx = np.argmin(np.abs(x_data - xmin))
+            xmax_idx = np.argmin(np.abs(x_data - xmax))
+            self.ratio_spectral_ax.set_xlim(x_data[xmin_idx], x_data[xmax_idx])
+
+            # Calculate y-limits based on the data within the new span
+            y_min = np.nanmin(self.ratio_spectrum[xmin_idx:xmax_idx])
+            y_max = np.nanmax(self.ratio_spectrum[xmin_idx:xmax_idx])
+
+            buffer = (y_max - y_min) * 0.1  # Add a buffer to y-limits
+            self.ratio_spectral_ax.set_ylim(y_min - buffer, y_max + buffer)
+
+            self.ratio_spectral_canvas.draw()
+
+        self.ratio_x_span_selector = SpanSelector(
+            self.ratio_spectral_ax, on_x_span_select, 'horizontal', useblit=True)
+
 
 if __name__ == "__main__":
     root = tk.Tk()
