@@ -2,10 +2,16 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from matplotlib.widgets import Cursor, SpanSelector
 import matplotlib.pyplot as plt
+from matplotlib.patches import Polygon
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.backend_bases import PickEvent
 import spectral
 import numpy as np
+import geopandas as gpd
+# from shapely.geometry import Point, Polygon
+import rasterio as rio
+from rasterio.plot import show
+import cv2
 
 class HyperspectralAnalyzer:
     '''
@@ -34,12 +40,18 @@ class HyperspectralAnalyzer:
         self.create_menu()
         self.spectral_window = None 
         self.ratio_spectral_window = None 
+        self.polygons_spectral_window = None
         self.right_hist_window = None
         self.left_hist_window = None
         self.right_is_parameter = False
         self.left_is_paramenter = False
         self.reset_right_hist = False
         self.reset_left_hist = False
+        self.draw_polygons = False
+        self.points = []
+        self.current_polygon = []
+        self.all_polygons = []
+        self.polygon_spectra = []
 
     def create_main_ui(self):
         '''
@@ -51,18 +63,47 @@ class HyperspectralAnalyzer:
         self.root.grid_rowconfigure(0, weight=1)  # Allow row 0 to expand vertically with window resize
         self.root.grid_columnconfigure(1, weight=1)  # Allow column 1 to expand horizontally with window resize
 
-        # # Create canvases and place them in the main_ui_frame
-        # self.create_left_canvas()
-        # self.create_right_canvas()
-
         # Create a label to display coordinates
         self.coordinates_label = tk.Label(self.main_ui_frame, text="Lat: 0.0000, Lon: 0.0000")
-        self.coordinates_label.grid(row=0, column=0, columnspan=2)
+        self.coordinates_label.grid(row=0, column=0, columnspan=2, sticky="new")
+        # self.coordinates_label.grid_rowconfigure(row=0, weight=0)
+
+        # frame for the buttons on the righthand side
+        self.right_buttons_frame = tk.Frame(self.main_ui_frame)
+        self.right_buttons_frame.grid(row=0, column=2, rowspan=2, sticky='new')
+        self.main_ui_frame.grid_columnconfigure(2, weight=1)
+        self.right_buttons_frame.grid_rowconfigure(0, weight=1)
+        self.right_buttons_frame.grid_columnconfigure(0, weight=1)
+
+        # Create a button to reset displays
+        self.reset_display_button = tk.Button(self.right_buttons_frame, text="Reset Display Extent", command=self.reset_display_extent)
+        self.reset_display_button.grid(row=0, column=0, sticky="new")
+        # self.reset_display_button.grid_rowconfigure(row=0, weight=0)
+
+        # Add a button to draw polygons
+        self.draw_polygons_button = tk.Button(self.right_buttons_frame, text="Draw Polygons On/Off", command=self.toggle_polygons)
+        self.draw_polygons_button.grid(row=1, column=0, sticky = 'new')
+
+        # Add a button to clear polygons from display
+        self.clear_polygons_button = tk.Button(self.right_buttons_frame, text="Clear Polygons From Display", command=self.remove_polygons_from_display)
+        self.clear_polygons_button.grid(row=2, column=0, sticky = 'new')
+
+        # Add a button to redraw the polgyons
+        self.redraw_polygons_button = tk.Button(self.right_buttons_frame, text="Redraw Polygons", command=self.draw_all_polygons)
+        self.redraw_polygons_button.grid(row=3, column=0, sticky = 'new')
+
+        # Add a button to clear all polygons
+        self.redraw_polygons_button = tk.Button(self.right_buttons_frame, text="Delete Polygons", command=self.clear_all_polygons)
+        self.redraw_polygons_button.grid(row=4, column=0, sticky = 'new')
+
+        # Add a button to plot spectra from all polygons
+        self.plot_polygon_spectra_button = tk.Button(self.right_buttons_frame, text="Plot Mean Spectra of Polygons", command=self.extract_spectra_from_polygons)
+        self.plot_polygon_spectra_button.grid(row=5, column=0, sticky = 'new')
 
         # Create a sub-frame for the left canvas buttons
         self.button_frame = tk.Frame(self.main_ui_frame)
         self.button_frame.grid(row=2, column=0, sticky=tk.N + tk.S + tk.W + tk.E)  # Use grid and place it in column 1
-        self.main_ui_frame.grid_rowconfigure(0, weight=1)  # Allow row 0 to expand vertically with window resize
+        self.main_ui_frame.grid_rowconfigure(0, weight=0)  # Allow row 0 to expand vertically with window resize
         self.main_ui_frame.grid_columnconfigure(1, weight=1)  # Allow column 1 to expand horizontally with window resize
         
         # Create band selection options for left canvas
@@ -216,61 +257,30 @@ class HyperspectralAnalyzer:
         hitogram_menu.add_command(label="Plot Left Frame Histogram", command=self.plot_left_histograms)
         hitogram_menu.add_command(label="Plot Right Frame Histogram", command=self.plot_right_histograms)
 
-# trying a new way to scroll here, but doesn't quite work right
-    # def create_left_canvas(self):
-    #     self.left_frame = tk.Frame(self.main_ui_frame)
-    #     self.left_frame.grid(row=1, column=0, sticky="nsew")
-
-    #     # Create a Canvas widget for scrollable area
-    #     self.left_canvas = tk.Canvas(self.left_frame, bg="white")
-    #     self.left_canvas.grid(row=0, column=0, sticky="nsew")
-
-    #     # Create a vertical scrollbar and attach it to the canvas
-    #     self.left_vertical_scrollbar = tk.Scrollbar(self.left_frame, orient=tk.VERTICAL, command=self.left_canvas.yview)
-    #     self.left_vertical_scrollbar.grid(row=0, column=1, sticky="ns")
-    #     self.left_canvas.config(yscrollcommand=self.left_vertical_scrollbar.set)
-
-    #     # Create a container frame to hold your content
-    #     self.left_container_frame = tk.Frame(self.left_canvas, bg="white")
-    #     self.left_canvas.create_window((0, 0), window=self.left_container_frame, anchor="nw")
-
-    #     # Bind the <Configure> event to adjust the scroll region dynamically
-    #     self.left_container_frame.bind("<Configure>", lambda e: self.left_canvas.configure(scrollregion=self.left_canvas.bbox("all")))
-
-    #     # Your Matplotlib figure and plot code
-    #     self.left_figure, self.left_ax = plt.subplots(figsize=(3, 3))
-    #     # ... Add your plot code here ...
-
-    #     # Embed your figure in the container frame
-    #     self.left_canvas_fig = FigureCanvasTkAgg(self.left_figure, self.left_container_frame)
-    #     self.left_canvas_fig.get_tk_widget().grid(row=0,column=0)#pack(fill=tk.BOTH, expand=tk.YES)
-
-    #     # Configure columns to expand with resizing
-    #     self.left_frame.grid_rowconfigure(0, weight=1)
-    #     self.left_frame.grid_columnconfigure(0, weight=1)
-
-    #     # Bind the click event to the canvas
-    #     self.left_canvas_fig.mpl_connect('button_press_event', self.on_left_canvas_click)
-    #     self.left_canvas_fig.mpl_connect('scroll_event', self.on_scroll)
-
     def create_left_canvas(self):
-        self.left_figure, self.left_ax = plt.subplots(figsize=(3, 3))
+        self.left_figure, self.left_ax = plt.subplots(figsize=(6, 6))
         self.left_ax.set_title("Hyperspectral Cube", fontsize= 8)
         self.left_ax.tick_params(axis='both', which='major', labelsize=8)
+        # Set the margins and spacing to zero
+        self.left_figure.tight_layout()
+        self.left_figure.subplots_adjust(wspace=0, hspace=0)
         
         self.left_frame = tk.Frame(self.main_ui_frame)
         self.left_frame.grid(row=1, column=0, sticky="nsew")
 
         self.left_canvas = FigureCanvasTkAgg(self.left_figure, master=self.left_frame)
-        self.left_canvas.get_tk_widget().grid(row=0, column=0)  # Use grid instead of pack
+        self.left_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")  # Use grid instead of pack
+
+        toolbar_frame = tk.Frame(self.left_frame)
+        toolbar = NavigationToolbar2Tk(self.left_canvas, toolbar_frame)
+        toolbar.update()
+        toolbar_frame.grid(row=1, column=0, sticky="nsew")
 
         # Configure columns to expand with resizing
         self.left_frame.grid_rowconfigure(0, weight=1)  # Adjust the column number if needed
         self.left_frame.grid_columnconfigure(0, weight=1)
-        
-        # Set the margins and spacing to zero
-        self.left_figure.tight_layout()
-        self.left_figure.subplots_adjust(wspace=0, hspace=0)
+        self.left_canvas.get_tk_widget().grid_columnconfigure(0, weight=1)
+        self.left_canvas.get_tk_widget().grid_rowconfigure(0, weight=1)
 
         if self.left_data.nrows/self.left_data.ncols > 2:
             # Create variables to store the current top-left pixel coordinates
@@ -278,8 +288,10 @@ class HyperspectralAnalyzer:
             self.top_left_col = 0
 
             # Define the fixed size of the displayed portion
-            self.left_display_rows = int(2*self.left_data.ncols)
+            self.left_display_rows = int(3*self.left_data.ncols)
+            self.left_ax.set_ylim(int(3*self.left_data.ncols), 0)
             self.left_display_cols = self.left_data.ncols
+            self.left_ax.set_xlim(0, self.left_data.ncols)
         else:
             # Create variables to store the current top-left pixel coordinates
             self.top_left_row = 0
@@ -301,32 +313,42 @@ class HyperspectralAnalyzer:
         self.left_canvas.mpl_connect('motion_notify_event', self.on_canvas_motion)
 
     def create_right_canvas(self):
-        self.right_figure, self.right_ax = plt.subplots(figsize=(3, 3))
-        self.right_ax.set_title("Hyperspectral Cube", fontsize=8)
+        self.right_figure, self.right_ax = plt.subplots(figsize=(6, 6))
+        self.right_ax.set_title("Band Parameter Image", fontsize=8)
         self.right_ax.tick_params(axis='both', which='major', labelsize=8)
+        # Set the margins and spacing to zero
+        self.right_figure.tight_layout()
+        self.right_figure.subplots_adjust(wspace=0, hspace=0)
 
         self.right_frame = tk.Frame(self.main_ui_frame)
         self.right_frame.grid(row=1, column=1, sticky="nsew")
 
         self.right_canvas = FigureCanvasTkAgg(self.right_figure, master=self.right_frame)
-        self.right_canvas.get_tk_widget().grid(row=0, column=0)  # Use grid instead of pack
+        self.right_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")  # Use grid instead of pack
+        # self.right_canvas.get_tk_widget().grid(row=1, column=0)
+
+        toolbar_frame = tk.Frame(self.right_frame)
+        toolbar = NavigationToolbar2Tk(self.right_canvas, toolbar_frame)
+        toolbar.update()
+        toolbar_frame.grid(row=1, column=0, sticky="nsew")
+
 
         # Configure columns to expand with resizing
         self.right_frame.grid_rowconfigure(0, weight=1)  # Adjust the column number if needed
         self.right_frame.grid_columnconfigure(0, weight=1)
-        
-        # Set the margins and spacing to zero
-        self.right_ax.margins(0, 0)
-        self.right_ax.autoscale(tight=True)
+        self.right_canvas.get_tk_widget().grid_columnconfigure(0, weight=1)
+        self.right_canvas.get_tk_widget().grid_rowconfigure(0, weight=1)
 
-        if self.right_data.nrows / self.right_data.ncols > 2:
+        if self.right_data.nrows/self.right_data.ncols > 2:
             # Create variables to store the current top-left pixel coordinates
             self.top_right_row = 0
             self.top_right_col = 0
 
             # Define the fixed size of the displayed portion
-            self.right_display_rows = int(2*self.right_data.ncols)
+            self.right_display_rows = int(3*self.right_data.ncols)
+            self.right_ax.set_ylim(int(3*self.right_data.ncols), 0)
             self.right_display_cols = self.right_data.ncols
+            self.right_ax.set_xlim(0, self.right_data.ncols)
         else:
             # Create variables to store the current top-left pixel coordinates
             self.top_right_row = 0
@@ -347,10 +369,22 @@ class HyperspectralAnalyzer:
         # self.right_canvas.mpl_connect('button_release_event', self.on_canvas_release)
         self.right_canvas.mpl_connect('motion_notify_event', self.on_canvas_motion)
 
+# ----------------------------------------------------------------
+# loading the data
+# ----------------------------------------------------------------
     def load_left_data(self):
         file_path = filedialog.askopenfilename(filetypes=[("ENVI Files", "*.hdr")])
         if file_path:
             self.left_data = spectral.io.envi.open(file_path)
+            rio_path = file_path.replace("hdr", "img")
+            self.left_rio = rio.open(rio_path)
+            self.map_info = self.left_data.metadata['map info']
+            self.crs = self.left_data.metadata['coordinate system string']
+            self.x_dpp = 5/self.left_data.ncols
+            self.y_dpp = 5/self.left_data.nrows
+            self.proj_info = self.left_data.metadata['projection info']
+            self.left_transform = self.left_rio.transform
+            self.transformer = rio.transform.AffineTransformer(self.left_transform)
             self.populate_left_wavelength_menus()
             self.create_left_canvas()
             self.create_left_scroll_bars()
@@ -420,7 +454,7 @@ class HyperspectralAnalyzer:
             try:
                 if self.right_data.bands.centers is not None:
                     # check if parameter image or spectral cube
-                    if self.right_data.bands.centers[1].isalpha():
+                    if str(self.right_data.bands.centers[1]).isalpha():
                         # this is a band parameter image
                         self.right_is_parameter = True
                         wavelengths = self.right_data.bands.centers
@@ -437,7 +471,7 @@ class HyperspectralAnalyzer:
                             self.right_wvl = [float(i) for i in self.right_data.bands.centers]
                 
                 elif self.right_data.bands.centers is None and self.right_data.metadata['band names'] is not None:
-                    if self.right_data.metadata['band names'][1].isalpha():
+                    if str(self.right_data.metadata['band names'][1]).isalpha():
                         # this is a band parameter image
                         self.right_is_parameter = True
                         wavelengths = self.right_data.metadata['band names']
@@ -463,6 +497,9 @@ class HyperspectralAnalyzer:
             self.right_green_band_menu.set(wavelengths[self.default_parameter_bands[1]])
             self.right_blue_band_menu.set(wavelengths[self.default_parameter_bands[2]])
 
+# ----------------------------------------------------------------
+# displaying the data
+# ----------------------------------------------------------------
     def update_left_display(self):
         try:
             red_band = float(self.left_red_band_var.get())
@@ -502,11 +539,11 @@ class HyperspectralAnalyzer:
         left_blue_stretch = (self.left_blue_min_stretch_var.get(), self.left_blue_max_stretch_var.get()) if hasattr(self, "left_blue_min_stretch_var") else None
 
         # print(self.top_left_row, self.left_display_rows, self.top_left_col, self.left_display_cols)
-        left_rgb_image = self.left_data[self.top_left_row:self.top_left_row + self.left_display_rows,
-                                        self.top_left_col:self.top_left_col + self.left_display_cols, 
-                                        [band_indices[0], band_indices[1], band_indices[2]]]
+        # left_rgb_image = self.left_data[self.top_left_row:self.top_left_row + self.left_display_rows,
+        #                                 self.top_left_col:self.top_left_col + self.left_display_cols, 
+        #                                 [band_indices[0], band_indices[1], band_indices[2]]]
         
-        # left_rgb_image = self.left_data[:,:,[band_indices[0], band_indices[1], band_indices[2]]]
+        left_rgb_image = self.left_data[:,:,[band_indices[0], band_indices[1], band_indices[2]]]
 
         if left_red_stretch is not None:
             left_rgb_image[:, :, 0] = self.stretch_band(left_rgb_image[:, :, 0], left_red_stretch)
@@ -516,6 +553,7 @@ class HyperspectralAnalyzer:
             left_rgb_image[:, :, 2] = self.stretch_band(left_rgb_image[:, :, 2], left_blue_stretch)
 
         self.left_ax.imshow(np.array(left_rgb_image))
+        # show(np.transpose(left_rgb_image, (2,0,1)), ax=self.left_ax, transform=self.left_transform)
         self.left_canvas.draw()
 
     def display_right_data(self, band_indices):
@@ -524,9 +562,11 @@ class HyperspectralAnalyzer:
         right_green_stretch = (self.right_green_min_stretch_var.get(), self.right_green_max_stretch_var.get()) if hasattr(self, "right_green_min_stretch_var") else None
         right_blue_stretch = (self.right_blue_min_stretch_var.get(), self.right_blue_max_stretch_var.get()) if hasattr(self, "right_blue_min_stretch_var") else None
 
-        right_rgb_image = self.right_data[self.top_right_row:self.top_right_row + self.right_display_rows,
-                                        self.top_right_col:self.top_right_col + self.right_display_cols, 
-                                        [band_indices[0], band_indices[1], band_indices[2]]]
+        # right_rgb_image = self.right_data[self.top_right_row:self.top_right_row + self.right_display_rows,
+        #                                 self.top_right_col:self.top_right_col + self.right_display_cols, 
+        #                                 [band_indices[0], band_indices[1], band_indices[2]]]
+
+        right_rgb_image = self.right_data[:,:,[band_indices[0], band_indices[1], band_indices[2]]]
 
         if right_red_stretch is not None:
             right_rgb_image[:, :, 0] = self.stretch_band(right_rgb_image[:, :, 0], right_red_stretch)
@@ -537,7 +577,18 @@ class HyperspectralAnalyzer:
 
         self.right_ax.imshow(np.array(right_rgb_image))
         self.right_canvas.draw()
+    
+    def reset_display_extent(self):
+        self.left_ax.set_ylim(self.left_display_rows, 0)
+        self.right_ax.set_ylim(self.right_display_rows, 0)
+        self.left_ax.set_xlim(0, self.left_display_cols)
+        self.right_ax.set_xlim(0, self.right_display_cols)
+        self.left_canvas.draw()
+        self.right_canvas.draw()
 
+# ----------------------------------------------------------------
+# histograms and stretching
+# ----------------------------------------------------------------
     def stretch_band(self, band, stretch_range):
         min_val, max_val = stretch_range
         stretched_band = (band - min_val) / (max_val - min_val)
@@ -841,9 +892,119 @@ class HyperspectralAnalyzer:
 
         self.right_hist_span_selectors.extend([right_red_selector, right_green_selector, right_blue_selector])
 
+# ----------------------------------------------------------------
+# polygon functions
+# ----------------------------------------------------------------
+    def toggle_polygons(self):
+        if self.draw_polygons:
+            self.draw_polygons = False
+            self.draw_polygons_button.config(text = "Drawing Polygons Off", relief="sunken")
+        else:
+            self.draw_polygons = True
+            self.draw_polygons_button.config(text = "Drawing Polygons On", relief="raised")
+
+    def draw_all_polygons(self):
+        for polygon in self.all_polygons:
+            x, y = zip(*polygon)
+            self.left_ax.plot(x, y, 'ro')
+            self.right_ax.plot(x, y, 'ro')
+            self.left_ax.add_patch(Polygon(polygon, closed=True, fill=False, color='k'))
+            self.right_ax.add_patch(Polygon(polygon, closed=True, fill=False, color='k'))
+            self.left_canvas.draw()
+            self.right_canvas.draw()
+
+    def remove_polygons_from_display(self):
+        self.left_ax.clear()
+        self.right_ax.clear()
+        self.update_left_display()
+        self.update_right_display()
+    
+    def clear_all_polygons(self):
+        # Ask the user if they are sure
+        answer = messagebox.askyesno("Confirmation", "Are you sure you want to delete all polygons?")
+        if answer:
+            self.all_polygons = []
+        else:
+            pass
+    
+    def extract_spectra_from_polygons(self):
+        if hasattr(self, "left_data"):
+            if self.all_polygons:
+                # get the indices of the pixels within the polygons
+                # left_row_indices = []
+                # left_col_indices = []
+                for polygon in self.all_polygons:
+                    mask = np.zeros((self.left_data.nrows, self.left_data.ncols), dtype=np.uint8)
+                    polygon_points_int = [(int(x), int(y)) for x, y in polygon]
+                    cv2.fillPoly(mask, [np.array(polygon_points_int)], 1) 
+                    # roi = self.left_data * mask
+                    gstats = spectral.calc_stats(self.left_data, mask=mask, allow_nan=True)
+                    mean_spectrum = gstats.mean
+
+                    # polygon = np.array(polygon)
+                    # polygon = np.round(polygon).astype(int)
+                    # polygon = np.flip(polygon, axis=1)
+                    # polygon = np.flip(polygon, axis=0)
+                    # polygon = np.transpose(polygon)
+                    # row_indices, col_indices = polygon
+                    # left_row_indices = np.array(row_indices)
+                    # left_col_indices = np.array(col_indices)
+
+                    # # get the spectra from the left data
+                    # print(left_row_indices, left_col_indices)
+                    # spectrum = self.left_data[left_row_indices, left_col_indices, :]
+                    # spectrum = np.where(spectrum < 0, np.nan, spectrum)
+                    # spectrum = np.where(spectrum > 1, np.nan, spectrum)
+                    # spectrum = np.transpose(spectrum, (1, 0, 2))
+                    # spectrum = np.nanmean(spectrum, axis=1)
+                    # spectrum = np.nan_to_num(spectrum)
+
+                    self.polygon_spectra.append(mean_spectrum)
+
+                # plot the spectra
+                self.update_polygons_spectral_plot()
+            else:
+                messagebox.showwarning("Warning", "No polygons drawn. Draw polygons first.")
+        else:
+            messagebox.showwarning("Warning", "No data loaded. Load hyperspectral data first into left frame.")
+            
+# ----------------------------------------------------------------
+# canvas click functionality
+# ----------------------------------------------------------------
     def on_left_canvas_click(self, event):
         if hasattr(self, "left_data"):
-            if event.inaxes == self.left_ax or event.inaxes == self.right_ax:
+            if self.draw_polygons:
+                if event.inaxes == self.left_ax or event.inaxes == self.right_ax:
+                    if event.button == 1:
+                        x, y = event.xdata, event.ydata
+                        self.current_polygon.append((x, y))
+                        self.left_ax.plot(x, y, 'ro')
+                        self.left_canvas.draw()
+                        self.right_ax.plot(x, y, 'ro')
+                        self.right_canvas.draw()
+                    elif event.button == 3:
+                        if self.current_polygon:
+                            # polygon = Polygon(self.current_polygon, closed=True, fill=False, color='k')
+                            # self.left_ax.add_patch(polygon)
+                            # self.left_canvas.draw()
+                            # self.right_ax.add_patch(polygon)
+                            # self.right_canvas.draw()
+                            # self.all_polygons.append(self.current_polygon)
+                            # self.current_polygon = []
+
+
+                            # old version
+                            self.current_polygon.append(self.current_polygon[0]) #close the polygon
+                            self.left_ax.plot(*zip(*self.current_polygon), 'k-')
+                            self.left_canvas.draw()
+                            self.right_ax.plot(*zip(*self.current_polygon), 'k-')
+                            self.right_canvas.draw()
+
+                            self.all_polygons.append(self.current_polygon)
+                            self.current_polygon = []
+
+
+            elif event.inaxes == self.left_ax or event.inaxes == self.right_ax:
                 if event.button == 1: #left mouse button press
                     x, y = int(event.xdata), int(event.ydata)
                     if self.bands_inverted:
@@ -868,10 +1029,10 @@ class HyperspectralAnalyzer:
 
     def on_canvas_motion(self, event):
         if hasattr(self, "left_data") and event.inaxes:
-            x_data, y_data = event.xdata, event.ydata
-            latitude, longitude = event.xdata, event.ydata
-            # latitude, longitude = convert_pixel_to_coordinates(x_data, y_data)
-            coordinate_text = f"Lat: {latitude:.4f}, Lon: {longitude:.4f}"
+            # latitude, longitude = event.xdata, event.ydata
+            lon = (event.xdata - self.left_data.ncols/2)*self.x_dpp + float(self.proj_info[3])
+            lat = ((self.left_data.nrows/2) - event.ydata )*self.y_dpp + float(self.proj_info[2])
+            coordinate_text = f"Lat: {lat:.4f}, Lon: {lon:.4f}"
             self.coordinates_label.config(text=coordinate_text)
             self.left_canvas.draw()
                 
@@ -890,9 +1051,6 @@ class HyperspectralAnalyzer:
                 
                 self.left_ax.set_xlim(new_x_lim)
                 self.left_ax.set_ylim(new_y_lim)
-
-                self.left_display_rows = int(new_y_lim[1])
-                self.left_display_cols = int(new_y_lim[1])
                 
                 self.left_canvas.draw()
         if hasattr(self, "right_data") and not hasattr(self, "left_data"):
@@ -909,9 +1067,6 @@ class HyperspectralAnalyzer:
                 
                 self.right_ax.set_xlim(new_x_lim)
                 self.right_ax.set_ylim(new_y_lim)
-
-                self.right_display_rows = int(new_y_lim[1])
-                self.right_display_cols = int(new_x_lim[1])
                 
                 self.right_canvas.draw()
         if hasattr(self, "right_data") and hasattr(self, "left_data"):
@@ -927,15 +1082,20 @@ class HyperspectralAnalyzer:
                 new_x_lim = [x_data - (x_data - x_lim[0]) * zoom_factor, x_data + (x_lim[1] - x_data) * zoom_factor]
                 new_y_lim = [y_data - (y_data - y_lim[0]) * zoom_factor, y_data + (y_lim[1] - y_data) * zoom_factor]
                 
+                if new_y_lim[0] > self.left_data.nrows:
+                    new_y_lim = [self.left_data.nrows, self.left_data.nrows-self.left_display_rows]
+                elif new_y_lim[1] < 0:
+                    new_y_lim = [self.left_display_rows, 0]
+                        
+                if new_x_lim[1] > self.left_data.ncols:
+                    new_x_lim = [self.left_display_cols-self.left_display_cols, self.left_display_cols]
+                elif new_x_lim[0] < 0:
+                    new_x_lim = [0, self.left_display_cols]
+
                 self.left_ax.set_xlim(new_x_lim)
                 self.left_ax.set_ylim(new_y_lim)
                 self.right_ax.set_xlim(new_x_lim)
                 self.right_ax.set_ylim(new_y_lim)
-
-                self.right_display_rows = np.max(int(new_y_lim[1]), 0)
-                self.right_display_cols = np.max(int(new_x_lim[1]), 0)
-                self.top_left_rows = np.max(int(new_y_lim[1]),0)
-                self._top_left_cols = np.max(int(new_x_lim[1]), 0)
                 
                 self.right_canvas.draw()
                 self.left_canvas.draw()
@@ -951,15 +1111,20 @@ class HyperspectralAnalyzer:
                 new_x_lim = [x_data - (x_data - x_lim[0]) * zoom_factor, x_data + (x_lim[1] - x_data) * zoom_factor]
                 new_y_lim = [y_data - (y_data - y_lim[0]) * zoom_factor, y_data + (y_lim[1] - y_data) * zoom_factor]
                 
+                if new_y_lim[0] > self.left_data.nrows:
+                    new_y_lim = [self.left_data.nrows, self.left_data.nrows-self.left_display_rows]
+                elif new_y_lim[1] < 0:
+                    new_y_lim = [self.left_display_rows, 0]
+                        
+                if new_x_lim[1] > self.left_data.ncols:
+                    new_x_lim = [self.left_display_cols-self.left_display_cols, self.left_display_cols]
+                elif new_x_lim[0] < 0:
+                    new_x_lim = [0, self.left_display_cols]
+
                 self.left_ax.set_xlim(new_x_lim)
                 self.left_ax.set_ylim(new_y_lim)
                 self.right_ax.set_xlim(new_x_lim)
                 self.right_ax.set_ylim(new_y_lim)
-
-                self.right_display_rows = np.max(int(new_y_lim[1]), 0)
-                self.right_display_cols = np.max(int(new_x_lim[1]), 0)
-                self.top_left_rows = np.max(int(new_y_lim[1]),0)
-                self._top_left_cols = np.max(int(new_x_lim[1]), 0)
                 
                 self.left_canvas.draw()
                 self.right_canvas.draw()
@@ -991,29 +1156,117 @@ class HyperspectralAnalyzer:
         self.right_canvas.get_tk_widget().config(xscrollcommand=self.right_horizontal_scrollbar.set)
 
     def on_vertical_scroll(self, *args):
-        scroll_y = float(args[1])
-        self.top_right_row = int(self.top_right_row + scroll_y*self.right_display_rows)#int(scroll_y * (float(self.right_data.nrows) - self.right_display_rows - self.top_right_row))
-        print(self.top_right_row, self.right_display_rows)
-        self.top_right_row = np.max([self.top_right_row, 0])
+        scroll_y = float(args[1])*self.left_display_rows
+        y_lim = self.left_ax.get_ylim()
+        
+        if y_lim[0] + scroll_y > self.left_data.nrows:
+            new_lim = [self.left_data.nrows, self.left_data.nrows-(y_lim[0]-y_lim[1])]
+        elif y_lim[1] + scroll_y < 0:
+            new_lim = [y_lim[0]-y_lim[1], 0]
+        else:
+            new_lim = [y_lim[0] + scroll_y, y_lim[1] + scroll_y]
 
-        self.top_left_row = int(self.top_left_row + scroll_y*self.left_display_rows)# int(scroll_y * (float(self.left_data.nrows) - self.left_display_rows - self.top_left_row))
-        print(self.top_left_row, self.left_display_rows)
-        self.top_left_row = np.max([self.top_left_row, 0])
+        self.left_ax.set_ylim(new_lim[0], new_lim[1])
+        self.right_ax.set_ylim(new_lim[0], new_lim[1])
 
-        self.update_left_display()
-        self.update_right_display()
+        self.left_canvas.draw()
+        self.right_canvas.draw()
+
+        # self.update_left_display()
+        # self.update_right_display()
 
     def on_horizontal_scroll(self, *args):
-        scroll_x = float(args[1])
-        self.top_right_col = int(scroll_x * (float(self.right_data.ncols) - self.right_display_cols - self.top_right_col))
-        self.top_right_col = np.max([self.top_right_col, 0]) 
+        scroll_x = float(args[1])*self.left_display_cols
+        x_lim = self.left_ax.get_xlim()
+        if x_lim[1] + scroll_x > self.left_data.ncols:
+            new_lim = [self.left_data.ncols-(x_lim[1]-x_lim[0]), self.left_data.ncols]
+        elif x_lim[0] + scroll_x < 0:
+            new_lim = [0, x_lim[1] - x_lim[0]]
+        else:
+            new_lim = [x_lim[0] + scroll_x, x_lim[1] + scroll_x]
+        self.left_ax.set_xlim(new_lim[0], new_lim[1])
+        self.right_ax.set_xlim(new_lim[0], new_lim[1])
 
-        self.top_left_col = int(scroll_x * (float(self.left_data.ncols) - self.left_display_cols - self.top_left_col))
-        self.top_left_col = np.max([self.top_left_col, 0])
+        self.left_canvas.draw()
+        self.right_canvas.draw()
 
-        self.update_left_display()
-        self.update_right_display()
+# ----------------------------------------------------------------
+# Spectral plotting area
+# ----------------------------------------------------------------
+    def create_polygons_spectral_plot(self):
+        self.polygons_spectral_window = tk.Toplevel(self.root)
+        self.polygons_spectral_window.title("ROI Spectral Plot")
+        
+        # Create a frame to hold UI elements with a fixed size
+        ui_frame = tk.Frame(self.polygons_spectral_window)
+        ui_frame.pack(fill=tk.X)
 
+        polygons_spectral_figure, self.polygons_spectral_ax = plt.subplots(figsize=(5,3))
+        for s in self.polygon_spectra:
+            s = s.flatten()
+            self.polygon_spectral_lines.append(self.polygons_spectral_ax.plot(self.left_wvl, s))
+        # self.polygon_spectral_lines, = self.polygons_spectral_ax.plot(self.left_wvl, self.polygon_spectra)
+        xmin, xmax = self.polygons_spectral_ax.get_xlim()
+        xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
+        xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
+        all_min_y = []
+        all_max_y = []
+        for s in self.polygon_spectra:
+            min_y, max_y = np.nanmin(s[xmin_idx:xmax_idx]), np.nanmax(s[xmin_idx:xmax_idx])
+            all_min_y.append(min_y)
+            all_max_y.append(max_y)
+        min_y, max_y = np.nanmin(all_min_y), np.nanmax(all_max_y)
+        buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
+        self.polygons_spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
+
+        self.polygons_spectral_canvas = FigureCanvasTkAgg(polygons_spectral_figure, master=self.polygons_spectral_window)
+        self.polygons_spectral_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # # Add a button to reset x-axis span
+        # self.reset_x_axis_button = tk.Button(ui_frame, text="Reset X-Axis Span", command=self.reset_x_axis_span)
+        # self.reset_x_axis_button.pack(side=tk.RIGHT)
+
+        # # Add built-in span options to a dropdown menu
+        # span_options = ["Full Span", "410 - 1000 nm", "1000 - 2600 nm", "1200 - 2000 nm", "1800 - 2500 nm", "2000 - 2500 nm", "2700 - 3900 nm"]
+        # self.polygons_span_var = tk.StringVar()
+        # self.polygons_span_var.set("Full Span")  # Set the default span option
+        # span_menu = ttk.Combobox(ui_frame, textvariable=self.polygons_span_var, values=span_options, state="readonly")
+        # span_menu.pack(side=tk.RIGHT)
+
+        # # Bind an event to update the x-axis span when a span option is selected
+        # span_menu.bind("<<ComboboxSelected>>", self.update_x_axis_span)
+
+        # Create a toolbar for the spectral plot
+        toolbar = NavigationToolbar2Tk(self.polygons_spectral_canvas, self.polygons_spectral_window)
+        toolbar.update()
+        self.polygons_spectral_canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        
+        # Add span selector for x-axis
+        # self.create_x_axis_span_selector(self.left_wvl)
+    
+    def update_polygons_spectral_plot(self):
+        if self.polygons_spectral_window is None or not self.polygons_spectral_window.winfo_exists():
+            self.polygon_spectral_lines = []
+            self.create_polygons_spectral_plot()
+        else:
+            for s in self.polygon_spectra:
+                s = s.flatten()
+                self.polygon_spectral_lines.append(self.polygons_spectral_ax.plot(self.left_wvl, s))
+            xmin, xmax = self.polygons_spectral_ax.get_xlim()
+            xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
+            xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
+            all_min_y = []
+            all_max_y = []
+            for s in self.polygon_spectra:
+                min_y, max_y = np.nanmin(s[xmin_idx:xmax_idx]), np.nanmax(s[xmin_idx:xmax_idx])
+                all_min_y.append(min_y)
+                all_max_y.append(max_y)
+            min_y, max_y = np.nanmin(all_min_y), np.nanmax(all_max_y)
+            buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
+            self.polygons_spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
+            self.polygons_spectral_canvas.draw()
+
+    
     def update_spectral_plot(self):
         if self.spectral_window is None or not self.spectral_window.winfo_exists():
             self.create_spectral_plot()
