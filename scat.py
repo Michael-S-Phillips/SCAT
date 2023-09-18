@@ -1,19 +1,15 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-from matplotlib.widgets import Cursor, SpanSelector
+from matplotlib.widgets import SpanSelector
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
-from matplotlib.backend_bases import PickEvent
 import spectral
 import numpy as np
-import geopandas as gpd
-# from shapely.geometry import Point, Polygon
 import rasterio as rio
-from rasterio.plot import show
 import cv2
 
-class HyperspectralAnalyzer:
+class SpectralCubeAnalysisTool:
     '''
     TODO:
         - Add functionality to draw polygon shape layers
@@ -1265,7 +1261,6 @@ class HyperspectralAnalyzer:
             buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
             self.polygons_spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
             self.polygons_spectral_canvas.draw()
-
     
     def update_spectral_plot(self):
         if self.spectral_window is None or not self.spectral_window.winfo_exists():
