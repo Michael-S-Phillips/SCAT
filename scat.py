@@ -12,13 +12,11 @@ import cv2
 class SpectralCubeAnalysisTool:
     '''
     TODO:
-        - Add functionality to draw polygon shape layers
-        - Add functionality to extract spectral data from polygon shape layers (avg and stddev)
-        - Extract geospatial information from the shape layers
-        - Have lat, lon info appear in the window and in the spectral plot
-            - this exists but is inaccurate if you scroll at all
+        - Adding more functionality to the polygon shape layer drawing.
+        - Exporting polygons as GIS-readable shape layers.
+        - Spectral smoothing routines
+        - Adding basic spectral analysis workflows, such as MNF
         - Add default RGB values for parameter image visualization mapped to Browse product combos
-        - fix display so that image fills the whole canvas
 
     This class creates a GUI for analyzing hyperspectral data. It allows the user to load a hyperspectral and analyze an image 
     '''
@@ -1488,6 +1486,6 @@ if __name__ == "__main__":
     def on_closing():
         root.destroy()
     root = tk.Tk()
-    app = HyperspectralAnalyzer(root)
+    app = SpectralCubeAnalysisTool(root)
     root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
