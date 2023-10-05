@@ -1,0 +1,44 @@
+CRISM TYPE SPECTRA CLASSES
+
+Iron oxides and primary silicates
+------->  Hematite
+------->  Mg-Olivine
+------->  Fe-Olivine
+------->  Plagioclase
+------->  Low-Ca Pyroxene
+------->  High-Ca Pyroxene
+
+Ices
+------->  H2O Ice
+------->  CO2 Ice
+
+Sulfates
+------->  Monohydrated sulfate
+------->  Alunite
+------->  Hydroxylated Fe-sulfate
+------->  Jarosite
+------->  Polyhydrated sulfate
+------->  Gypsum
+------->  Bassanite
+
+Phyllosilicates
+------->  Kaolinite
+------->  Al-Smectite
+------->  Margarite
+------->  Illite/Muscovite
+------->  Fe-Smectite
+------->  Mg-Smectite
+------->  Talc
+------->  Serpentine
+------->  Chlorite
+
+Carbonates
+------->  Mg-Carbonate
+------->  Ca/Fe-Carbonate
+
+Other hydrated silicates and halides
+------->  Hydrated Silica
+------->  Epidote
+------->  Analcime
+------->  Chloride
+------->  Prehnite

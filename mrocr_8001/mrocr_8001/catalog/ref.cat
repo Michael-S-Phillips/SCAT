@@ -1,0 +1,299 @@
+PDS_VERSION_ID                     = PDS3
+LABEL_REVISION_NOTE                = "J. Ward, 2014-04-22;
+                                      J. Ward, 2015-04-28."
+RECORD_TYPE                        = STREAM
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "BISHOPETAL2008"
+  REFERENCE_DESC                   = "Bishop, J. L., et al., Phyllosilicate 
+  diversity and past aqueous activity revealed at Mawrth Vallis, Mars, 
+  Science, 321(5890), 830-833, doi:10.1126/science.1159699, 2008."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "BISHOPETAL2009"
+  REFERENCE_DESC                   = "Bishop, J. L., et al., Mineralogy of 
+  Juventae Chasma: Sulfates in the light-toned mounds, mafic minerals in 
+  the bedrock, and hydrated silica and hydroxylated ferric sulfate on the 
+  plateau, J. Geophys. Res., 114, E00D09, doi:10.1029/2009JE003352, 2009."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "BROWNETAL2010A"
+  REFERENCE_DESC                   = "Brown, A. J., W. M. Calvin, P. C. 
+  McGuire, and S. L. Murchie, Compact Reconnaissance Imaging Spectrometer 
+  for Mars (CRISM) south polar mapping: First Mars year of observations, 
+  J. Geophys. Res., 115, E00D13, doi:10.1029/2009JE003333, 2010."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "BUGBYETAL2005"
+  REFERENCE_DESC                   = "Bugby, D., J. Garzon, M. Beres,
+    C. Stouffer, D. Mehoke, and M. Wirzburger, Cryogenic diode heat pipe
+    system for cryocooler redundancy, in Proc. SPIE, edited by J.B. Heaney
+    and L.G. Burriesci, Vol. 5904, pp. 321-329, 2005."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "CALVINETAL2009"
+  REFERENCE_DESC                   = "Calvin, W. M., L. H. Roach, F. P. 
+  Seelos, K. D. Seelos, R. O. Green, S. L. Murchie, and J. F. Mustard, 
+  Compact Reconnaissance Imaging Spectrometer for Mars observations of 
+  northern Martian latitudes in summer, J. Geophys. Res., 114, E00D11, 
+  doi:10.1029/2009JE003348, 2009."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "CARTERETAL2013A"
+  REFERENCE_DESC                   = "Carter, J., F. Poulet, S. Murchie, 
+  and J. P. Bibring, Automated processing of planetary hyperspectral 
+  datasets for the extraction of weak mineral signatures and applications 
+  to CRISM observations of hydrated silicates on Mars, Planet. Space Sci., 
+  76, 53-67, 2013."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "CARTERETAL2013B"
+  REFERENCE_DESC                   = "Carter, J., F. Poulet, J.-P. Bibring, 
+  N. Mangold, and S. Murchie, Hydrous minerals on Mars as seen by 
+  the CRISM and OMEGA imaging spectrometers: Updated global view, J. Geophys. 
+  Res. Planets, 118, 831-858, doi:10.1029/2012JE004145, 2013."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "CULLETAL2010"
+  REFERENCE_DESC                   = "Cull, S., R. E. Arvidson, M. Mellon, 
+  S. Wiseman, R. Clark, T. Titus, R. V. Morris, and P. McGuire, Seasonal 
+  H2O and CO2 ice cycles at the Mars Phoenix landing site: 1. Prelanding 
+  CRISM and HiRISE observations, J. Geophys. Res., 115, E00D16, 
+  doi:10.1029/2009JE003340, 2010."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "EHLMANNETAL2008"
+  REFERENCE_DESC                   = "Ehlmann, B. L., J. F. Mustard, S. L. 
+  Murchie, F. Poulet, J. L. Bishop, L. H. Roach, T. L. Roush, G. A. Swayze, 
+  and J. J. Wray (2008), Orbital identification of carbonate-bearing rocks 
+  on Mars, Science, 322, 1828-1832, 2008."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "EHLMANNETAL2009"
+  REFERENCE_DESC                   = "Ehlmann, B. L., et al., Identification 
+  of hydrated silicate minerals on Mars using MRO-CRISM: Geologic context 
+  near Nili Fossae and implications for aqueous alteration, J. Geophys. 
+  Res., 114, E00D08, doi:10.1029/2009JE003339, 2009."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "EHLMANNETAL2010"
+  REFERENCE_DESC                   = "Ehlmann, B. L., J. F. Mustard, and 
+  S. L. Murchie, Geologic setting of serpentine deposits on Mars, Geophys. 
+  Res. Lett., 37, L06201, doi:10.1029/2010GL042596, 2010."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "FARRANDETAL2009"
+  REFERENCE_DESC                   = "Farrand, W. H., T. D. Glotch, J. W. 
+  Rice, J. A. Hurowitz, and G. A. Swayze, Discovery of jarosite within the 
+  Mawrth Vallis region of Mars: Implications for the geologic history of 
+  the region, Icarus, 204(2), 478-488, doi:10.1016/j.icarus.2009.07.014, 
+  2009."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "HANSEN1997"
+  REFERENCE_DESC                   = "Hansen, G. B., Spectral 
+    absorption of solid CO2 from the ultraviolet to the far-infrared, 
+    Adv. Sp. Res., 20(8), 1613-1616, 1997."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "LEESETAL2005"
+  REFERENCE_DESC                   = "Lees, J., E. Schaefer, and M. Fasold,
+    Design of the CRISM cryogenic system and focal plane assembly isolation
+    system, in Proc. SPIE, edited by A.E. Hatheway, Vol. 5877, pp. 265-275,
+    2005."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "LICHTENBERGETAL2010"
+  REFERENCE_DESC                   = "Lichtenberg, K. A., et al., 
+    Stratigraphy of hydrated sulfates in the sedimentary deposits of Aram 
+    Chaos, Mars, J. Geophys. Res., 115, E00D17, 2010."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "MICHALSKIETAL2010"
+  REFERENCE_DESC                   = "Michalski, J. R., and P. B. Niles, 
+  Deep crustal carbonate rocks exposed by meteor impact on Mars, Nat. 
+  Geosci., 3(11), 751-755 doi:10.1038/ngeo971, 2010."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "MURCHIEETAL2004"
+  REFERENCE_DESC                   = "Murchie, S., R. Arvidson, P. Bedini1,
+    K. Beisser, J.-P.  Bibring, J. Bishop, J. Boldt, T. Choo, R.T. Clancy,
+    E.H. Darlington, D. Des Marais, R. Espiritu, M. Fasold, D. Fort,
+    R. Green, E. Guinness, J. Hayes, C. Hash, K. Heffernan, J. Hemmler,
+    G. Heyler, D. Humm, J. Hutchison, N. Izenberg, R. Lee, J. Lees, D. Lohr,
+    E. Malaret, T. Martin, R. Morris, J. Mustard, E. Rhodes, M. Robinson,
+    T. Roush, E. Schaefer, G. Seagrave, P. Silverglate, S. Slavney, M. Smith,
+    K. Strohbehn, H. Taylor, P. Thompson, and B. Tossman, CRISM (Compact
+    Reconnaissance Imaging Spectrometer for Mars) on MRO (Mars
+    Reconnaissance Orbiter), Proc. SPIE, edited by C.A. Nardell, P.G. Lucey,
+    J. Yee, and J.B. Garvin, Vol. 5660, pp. 66-77, 2004."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "MURCHIEETAL2006"
+  REFERENCE_DESC                   = "Murchie, S., R.E. Arvidson, P. Bedini, 
+    K. Beisser, J.-P. Bibring, J. Bishop, J. Boldt, P. Cavender, T. Choo, 
+    R.T. Clancy, E.H. Darlington, D. Des Marais, R. Espiritu, M. Fasold,
+    D. Fort, R. Green, E. Guinness, J. Hayes, C. Hash, K. Heffernan,
+    J. Hemmler, G. Heyler, D. Humm, J. Hutcheson, N. Izenberg, R. Lee,
+    J. Lees, D. Lohr, E. Malaret, T. Martin, J.A. McGovern, R.V. Morris,
+    J. Mustard, S. Pelkey, E. Rhodes, M. Robinson, T. Roush, E. Schaefer,
+    G. Seagrave, F. Seelos, P. Silverglate, S. Slavney, M. Smith,
+    K. Strohbehn, H. Taylor, P. Thompson, B. Tossman , and M. Wolff, 
+    Compact Reconnaissance Imaging Spectrometer for Mars (CRISM) on Mars
+    Reconnaissance Orbiter (MRO), J. Geophys. Res., 112, E05S03, 
+    doi:10.1029/2006JE002682, 2007."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "MURCHIEETAL2009"
+  REFERENCE_DESC                   = "Murchie, S. L., et al., A synthesis 
+  of Martian aqueous mineralogy after 1 Mars year of observations from the 
+  Mars Reconnaissance Orbiter, J. Geophys. Res., 114, E00D06, 
+  doi:10.1029/2009JE003342, 2009."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "MUSTARDETAL2008"
+  REFERENCE_DESC                   = "Mustard, J. F., et al., Hydrated 
+  silicate minerals on Mars observed by the Mars Reconnaissance Orbiter 
+  CRISM instrument, Nature, 454(7202), 305-309, doi:10.1038/nature07097, 
+  2008."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "MUSTARDETAL2009"
+  REFERENCE_DESC                   = "Mustard, J. F., B. L. Ehlmann, 
+  S. L. Murchie, F. Poulet, N. Mangold, J. W. Head, J.-P. Bibring, and 
+  L. H. Roach, Composition, morphology, and stratigraphy of noachian crust 
+  around the Isidis basin, J. Geophys. Res., 114, E00D12, 
+  doi:10.1029/2009JE003349, 2009."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "PELKEYETAL2005"
+  REFERENCE_DESC                   = "Pelkey, S.M., J.F. Mustard,
+    J.-P. Bibring, R.E. Milliken, Y. Langevin, B. Gondet, A. Gendrin,
+    F. Poulet, S. Erard, S. Murchie, R.E. Arvidson, and the OMEGA and CRISM
+    Science Teams, Global Spectral and Compositional Diversity of Mars: A
+    Test of CRISM Global Mapping with Mars Express OMEGA Data, Lunar and
+    Planetary Science XXXVI, Vol. 1458, 2005."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "ROACHETAL2009"
+  REFERENCE_DESC                   = "Roach, L. H., J. F. Mustard, S. L. 
+  Murchie, J.-P. Bibring, F. Forget, K. W. Lewis, O. Aharonson, M. Vincendon, 
+  and J. L. Bishop, Testing evidence of recent hydration state change in 
+  sulfates on Mars, J. Geophys. Res., 114, E00D02, doi:10.1029/2008JE003245, 
+  2009."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "ROACHETAL2010"
+  REFERENCE_DESC                   = "Roach, L. H., J. F. Mustard, M. D. 
+  Lane, J. L. Bishop, and S. L. Murchie, Diagenetic haematite and sulfate 
+  assemblages in Valles Marineris, Icarus, 207(2), 659-674, 2010."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "SILVERGLATE&FORT2004"
+  REFERENCE_DESC                   = "Silverglate, P.R., and D.E. Fort,
+    System design of the CRISM (compact reconnaissance imaging spectrometer
+    for Mars) hyperspectral imager, in Proc. SPIE, edited by S.S. Shen and
+    P.E. Lewis, Vol. 5159, pp. 283-290, 2004."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "SKOKETAL2010"
+  REFERENCE_DESC                   = "Skok, J. R., J. F. Mustard, S. L. 
+  Murchie, M. B. Wyatt, and B. L. Ehlmann, Spectrally distinct ejecta in 
+  Syrtis Major, Mars: Evidence for environmental change at the Hesperian-
+  Amazonian boundary, J. Geophys. Res., 115, E00D14, 
+  doi:10.1029/2009JE003338, 2010."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "SKOKETAL2012"
+  REFERENCE_DESC                   = "Skok, J. R., J. F. Mustard, L. L. 
+  Tornabene, C. Pan, D. Rogers, and S. L. Murchie, A spectroscopic analysis 
+  of Martian crater central peaks: Formation of the ancient crust, J. 
+  Geophys. Res., 117, E00J18, doi:10.1029/2012JE004148, 2012."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "SWAYZEETAL2008"
+  REFERENCE_DESC                   = "Swayze, G. A., et al., Discovery of 
+  the acid-sulfate mineral alunite in Terra Sirenum, Mars, using MRO CRISM: 
+  Possible evidence for acid-saline lacustrine deposits?, Am. Geophys. 
+  Union Fall Meeting, abstract #P44A-04, 2008."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "TROLLETAL2005"
+  REFERENCE_DESC                   = "Troll, J., P. Thompson, and D. Humm,
+    Boresight and gimbal axis alignment for the CRISM instrument, in Proc.
+    SPIE, edited by A.E. Hatheway, Vol. 5877, pp. 93-101, 2005."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "VIVIANOETAL2013A"
+  REFERENCE_DESC                   = "Viviano, C. E., J. E. Moersch, and 
+  H. Y. McSween, Implications for early hydrothermal environments on Mars 
+  through the spectral evidence for carbonation and chloritization reactions 
+  in the Nili Fossae region, J. Geophys. Res. Planets, 118, 1858-1872, 
+  doi:10.1002/jgre.20141, 2013."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "VIVIANOETAL2013B"
+  REFERENCE_DESC                   = "Viviano, C. E., S. L. Murchie, J. R. 
+  Johnson, and F. P. Seelos, The distribution and mineralogy of hydrated 
+  minerals in wall and floor material of Valles Marineris, Lunar Planet. 
+  Inst. Sci. Conf. Abstr., 44, 2909, 2013."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "VIVIANO-BECKETAL2014"
+  REFERENCE_DESC                   = "Viviano-Beck, C.E., F.P. Seelos, 
+    S.L. Murchie, E.G. Kahn, K.D. Seelos, H.W. Taylor, K. Taylor, 
+    B.L. Ehlmann, S.M. Wiseman, J.F. Mustard, and M.F. Morgan,
+    Revised CRISM Spectral Parameters and Summary Products Based on the 
+    Currently Detected Mineral Diversity on Mars, J. Geophys. Res., 
+    Vol. 119, pp. 1403-1431, doi:10.1002/2014JE004627, 2014."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "WRAYETAL2010"
+  REFERENCE_DESC                   = "Wray, J. J., S. W. Squyres, L. H. 
+  Roach, J. L. Bishop, J. F. Mustard, and E. Z. Noe Dobrea, Identification 
+  of the Ca-sulfate bassanite in Mawrth Vallis, Mars, Icarus, 209(2), 
+  416-421, doi:10.1016/j.icarus.2010.06.001, 2010."
+END_OBJECT                         = REFERENCE
+
+OBJECT                             = REFERENCE
+  REFERENCE_KEY_ID                 = "WRAYETAL2013"
+  REFERENCE_DESC                   = "Wray, J. J., S. T. Hansen, J. Dufek, 
+  G. A. Swayze, S. L. Murchie, F. P. Seelos, J. R. Skok, R. P. Irwin, and 
+  M. S. Ghiorso, Prolonged magmatic activity on Mars inferred from the 
+  detection of felsic rocks, Nat. Geosci., 6(12), 1013-1017, 
+  doi:10.1038/ngeo1994, 2013."
+END_OBJECT                         = REFERENCE
+
+END

@@ -1,0 +1,37 @@
+PDS_VERSION_ID        = PDS3
+RECORD_TYPE           = STREAM
+
+OBJECT                = TEXT
+  PUBLICATION_DATE    = 2015-09-11
+  NOTE                = "Description of contents of DOCUMENT directory."
+END_OBJECT            = TEXT
+END
+
+The primary documentation for the CRISM Type Spectra data set is the paper
+by Viviano-Beck et al., "Revised CRISM Spectral Parameters and Summary 
+Products Based on the Currently Detected Mineral Diversity On Mars," which 
+describes the general approach to the data collection and processing for 
+the archive. The published version is not included in the archive due 
+to copyright restrictions, however it may be accessed via the Wiley website 
+with a subscription
+(http://onlinelibrary.wiley.com/doi/10.1002/2014JE004627/full). 
+   
+The complete citation is:
+Christina E. Viviano-Beck, Frank P. Seelos, Scott L. Murchie, 
+Eliezer G. Kahn, Kimberley D. Seelos, Howard W. Taylor, Kelly Taylor, 
+Bethany L. Ehlmann, Sandra M. Wiseman, John. F. Mustard, and 
+M. Frank Morgan, Revised CRISM Spectral Parameters and Summary Products 
+Based on the Currently Detected Mineral Diversity on Mars, Journal of 
+Geophysical Research, Vol. 119, pp. 1403-1431, doi:10.1002/2014JE004627, 
+2014.
+
+The following files are included in this directory:
+
+TYPESPECTRA_DEFINITIONS.TXT - Definitions of label keywords specific to
+   the CRISM Type Spectra data set. 
+TYPESPECTRA_DEFINITIONS.LBL - PDS document label for 
+   TYPESPECTRA_DEFINITIONS.TXT.
+
+CRISM_TYPESPECTRA_CLASS.TXT - Classes of CRISM Type Spectra.
+CRISM_TYPESPECTRA_CLASS.LBL - PDS document label for
+   CRISM_TYPESPECTRA_CLASS.TXT.

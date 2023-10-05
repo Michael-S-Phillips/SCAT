@@ -1,0 +1,51 @@
+PDS_VERSION_ID               = PDS3
+RECORD_TYPE                  = UNDEFINED
+
+OBJECT                       = VOLUME
+  VOLUME_SERIES_NAME         = "MISSION TO MARS"
+  VOLUME_SET_NAME            = "MRO CRISM TYPE SPECTRA LIBRARY"
+  VOLUME_SET_ID              = "USA_NASA_PDS_MROCR_8001"
+  VOLUMES                    = UNK
+  VOLUME_NAME                = "MRO CRISM TYPE SPECTRA LIBRARY"
+  VOLUME_ID                  = MROCR_8001
+  VOLUME_FORMAT              = "N/A"
+  VOLUME_VERSION_ID          = "VERSION 1"
+  MEDIUM_TYPE                = "ELECTRONIC"
+  DATA_SET_ID                = "MRO-M-CRISM-4-TYPESPEC-V1.0"
+                                
+  PUBLICATION_DATE           = 2014-05-15
+  DESCRIPTION                = "This volume contains 31 ratioed type 
+                                spectra from 28 different Mars 
+                                Reconnaissance Orbiter (MRO) Compact 
+                                Reconnaissance Imaging Spectrometer 
+                                for Mars (CRISM) targeted 
+                                hyperspectral observations. The volume
+                                also contains detailed documentation 
+                                about the mission, instrument, and 
+                                data set, as well as an index table."
+
+  OBJECT                     = DATA_PRODUCER
+    INSTITUTION_NAME         = "JOHNS HOPKINS UNIVERSITY APPLIED
+                                PHYSICS LABORATORY"
+    FACILITY_NAME            = "N/A"
+    FULL_NAME                = "CHRISTINA E. VIVIANO-BECK"
+    ADDRESS_TEXT             = "JOHNS HOPKINS UNIVERSITY APPLIED
+                                PHYSICS LABORATORY
+                                11100 JOHNS HOPKINS ROAD
+                                LAUREL, MD 20723-6099"
+    TELEPHONE_NUMBER         = "2402287783"
+    ELECTRONIC_MAIL_TYPE     = "INTERNET"
+    ELECTRONIC_MAIL_ID       = "CHRISTINA.BECK@JHUAPL.EDU"
+  END_OBJECT                 = DATA_PRODUCER
+
+  OBJECT                     = CATALOG
+    ^DATA_SET_CATALOG        = "DATASET.CAT"
+    ^INSTRUMENT_CATALOG      = "CRISM_INST.CAT"
+    ^INSTRUMENT_HOST_CATALOG = "INSTHOST.CAT"
+    ^MISSION_CATALOG         = "MISSION.CAT"
+    ^PERSONNEL_CATALOG       = "PERSON.CAT"
+    ^REFERENCE_CATALOG       = "REF.CAT"
+  END_OBJECT                 = CATALOG
+
+END_OBJECT                   = VOLUME
+END

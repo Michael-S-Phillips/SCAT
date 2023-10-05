@@ -45,6 +45,7 @@ class SpectralCubeAnalysisTool:
         self.points = []
         self.current_polygon = []
         self.all_polygons = []
+        self.polygon_colors = []
         self.polygon_spectra = []
 
     def create_main_ui(self):
@@ -75,24 +76,24 @@ class SpectralCubeAnalysisTool:
         # self.reset_display_button.grid_rowconfigure(row=0, weight=0)
 
         # Add a button to draw polygons
-        self.draw_polygons_button = tk.Button(self.right_buttons_frame, text="Draw Polygons On/Off", command=self.toggle_polygons)
+        self.draw_polygons_button = tk.Button(self.right_buttons_frame, text="Draw Polygons", command=self.create_polygons_menu_window)
         self.draw_polygons_button.grid(row=1, column=0, sticky = 'new')
 
-        # Add a button to clear polygons from display
-        self.clear_polygons_button = tk.Button(self.right_buttons_frame, text="Clear Polygons From Display", command=self.remove_polygons_from_display)
-        self.clear_polygons_button.grid(row=2, column=0, sticky = 'new')
+        # # Add a button to clear polygons from display
+        # self.clear_polygons_button = tk.Button(self.right_buttons_frame, text="Clear Polygons From Display", command=self.remove_polygons_from_display)
+        # self.clear_polygons_button.grid(row=2, column=0, sticky = 'new')
 
-        # Add a button to redraw the polgyons
-        self.redraw_polygons_button = tk.Button(self.right_buttons_frame, text="Redraw Polygons", command=self.draw_all_polygons)
-        self.redraw_polygons_button.grid(row=3, column=0, sticky = 'new')
+        # # Add a button to redraw the polgyons
+        # self.redraw_polygons_button = tk.Button(self.right_buttons_frame, text="Redraw Polygons", command=self.draw_all_polygons)
+        # self.redraw_polygons_button.grid(row=3, column=0, sticky = 'new')
 
-        # Add a button to clear all polygons
-        self.redraw_polygons_button = tk.Button(self.right_buttons_frame, text="Delete Polygons", command=self.clear_all_polygons)
-        self.redraw_polygons_button.grid(row=4, column=0, sticky = 'new')
+        # # Add a button to clear all polygons
+        # self.redraw_polygons_button = tk.Button(self.right_buttons_frame, text="Delete Polygons", command=self.clear_all_polygons)
+        # self.redraw_polygons_button.grid(row=4, column=0, sticky = 'new')
 
-        # Add a button to plot spectra from all polygons
-        self.plot_polygon_spectra_button = tk.Button(self.right_buttons_frame, text="Plot Mean Spectra of Polygons", command=self.extract_spectra_from_polygons)
-        self.plot_polygon_spectra_button.grid(row=5, column=0, sticky = 'new')
+        # # Add a button to plot spectra from all polygons
+        # self.plot_polygon_spectra_button = tk.Button(self.right_buttons_frame, text="Plot Mean Spectra of Polygons", command=self.extract_spectra_from_polygons)
+        # self.plot_polygon_spectra_button.grid(row=5, column=0, sticky = 'new')
 
         # Create a sub-frame for the left canvas buttons
         self.button_frame = tk.Frame(self.main_ui_frame)
@@ -376,7 +377,10 @@ class SpectralCubeAnalysisTool:
             self.crs = self.left_data.metadata['coordinate system string']
             self.x_dpp = 5/self.left_data.ncols
             self.y_dpp = 5/self.left_data.nrows
-            self.proj_info = self.left_data.metadata['projection info']
+            if hasattr(self.left_data.metadata, 'projection info'):
+                self.proj_info = self.left_data.metadata['projection info']
+            else:
+                self.proj_info = self.map_info[1:]
             self.left_transform = self.left_rio.transform
             self.transformer = rio.transform.AffineTransformer(self.left_transform)
             self.populate_left_wavelength_menus()
@@ -465,7 +469,7 @@ class SpectralCubeAnalysisTool:
                             self.right_wvl = [float(i) for i in self.right_data.bands.centers]
                 
                 elif self.right_data.bands.centers is None and self.right_data.metadata['band names'] is not None:
-                    if str(self.right_data.metadata['band names'][1]).isalpha():
+                    if any(char.isalpha() for char in str(self.right_data.metadata['band names'][1])):
                         # this is a band parameter image
                         self.right_is_parameter = True
                         wavelengths = self.right_data.metadata['band names']
@@ -522,6 +526,7 @@ class SpectralCubeAnalysisTool:
             green_index = self.right_wvl.index(green_band)
             blue_index = self.right_wvl.index(blue_band)
             self.right_band_indices = [red_index, green_index, blue_index]
+
             self.display_right_data(self.right_band_indices)
         except ValueError:
             messagebox.showerror("Error", "Invalid wavelength. Please enter valid wavelengths.")
@@ -616,9 +621,9 @@ class SpectralCubeAnalysisTool:
                 blue_range = (left_min_value, left_max_value)
                 self.reset_left_hist = False
             else:
-                red_range = (self.left_red_min_stretch_var.get()*0.8, self.left_red_max_stretch_var.get()*1.2)
-                green_range = (self.left_green_min_stretch_var.get()*0.8, self.left_green_max_stretch_var.get()*1.2)
-                blue_range = (self.left_blue_min_stretch_var.get()*0.8, self.left_blue_max_stretch_var.get()*1.2)
+                red_range =   (self.left_red_min_stretch_var.get() -   abs(self.left_red_min_stretch_var.get()*0.2),   self.left_red_max_stretch_var.get() +   abs(self.left_red_max_stretch_var.get()*0.2))
+                green_range = (self.left_green_min_stretch_var.get() - abs(self.left_green_min_stretch_var.get()*0.2), self.left_green_max_stretch_var.get() + abs(self.left_green_max_stretch_var.get()*0.2))
+                blue_range =  (self.left_blue_min_stretch_var.get() -  abs(self.left_blue_min_stretch_var.get()*0.2),  self.left_blue_max_stretch_var.get() +  abs(self.left_blue_max_stretch_var.get()*0.2))
             
 
             # Update the data in the existing subplots
@@ -675,8 +680,20 @@ class SpectralCubeAnalysisTool:
             right_blue_channel = np.where(self.right_data[:, :, right_blue_index] > 1, np.nan, self.right_data[:, :, right_blue_index])
 
             # Calculate min and max values across all three channels
-            right_min_value = min(np.nanmin(right_red_channel), np.nanmin(right_green_channel), np.nanmin(right_blue_channel))
-            right_max_value = max(np.nanmax(right_red_channel), np.nanmax(right_green_channel), np.nanmax(right_blue_channel))
+            # right_min_value = min(np.nanmin(right_red_channel), np.nanmin(right_green_channel), np.nanmin(right_blue_channel))
+            # right_max_value = max(np.nanmax(right_red_channel), np.nanmax(right_green_channel), np.nanmax(right_blue_channel))
+
+            # calculate the mean and standard deviation of all three channels
+            right_red_mean = np.nanmean(right_red_channel)
+            right_green_mean = np.nanmean(right_green_channel)
+            right_blue_mean = np.nanmean(right_blue_channel)
+            right_red_std = np.nanstd(right_red_channel)
+            right_green_std = np.nanstd(right_green_channel)
+            right_blue_std = np.nanstd(right_blue_channel)
+
+            # set the right_min_value and right_max_value to be -3*std and 3*std from the mean
+            right_min_value = min(right_red_mean - 2.5*right_red_std, right_green_mean - 2.5*right_green_std, right_blue_mean - 2.5*right_blue_std)
+            right_max_value = max(right_red_mean + 2.5*right_red_std, right_green_mean + 2.5*right_green_std, right_blue_mean + 2.5*right_blue_std)
 
             if self.right_hist_window is None or not self.right_hist_window.winfo_exists():
                 hist_args = right_min_value, right_max_value, right_red_band, right_green_band, right_blue_band
@@ -688,9 +705,9 @@ class SpectralCubeAnalysisTool:
                 blue_range = (right_min_value, right_max_value)
                 self.reset_right_hist = False
             else:
-                red_range = (self.right_red_min_stretch_var.get()*0.8, self.right_red_max_stretch_var.get()*1.2)
-                green_range = (self.right_green_min_stretch_var.get()*0.8, self.right_green_max_stretch_var.get()*1.2)
-                blue_range = (self.right_blue_min_stretch_var.get()*0.8, self.right_blue_max_stretch_var.get()*1.2)
+                red_range = (self.right_red_min_stretch_var.get() - abs(self.right_red_min_stretch_var.get()*0.2), self.right_red_max_stretch_var.get() + abs(self.right_red_max_stretch_var.get()*0.2))
+                green_range = (self.right_green_min_stretch_var.get() - abs(self.right_green_min_stretch_var.get()*0.2), self.right_green_max_stretch_var.get() + abs(self.right_green_max_stretch_var.get()*0.2))
+                blue_range = (self.right_blue_min_stretch_var.get() - abs(self.right_blue_min_stretch_var.get()*0.2), self.right_blue_max_stretch_var.get() + abs(self.right_blue_max_stretch_var.get()*0.2))
             
             # Update the data in the existing subplots
             self.right_hist_axes[0].cla()
@@ -745,8 +762,8 @@ class SpectralCubeAnalysisTool:
         self.left_hist_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
         # Add a button to reset the histogram
-        self.reset_x_axis_button = tk.Button(left_hist_ui_frame, text="Reset Histogram", command=self.reset_left_hist_button)
-        self.reset_x_axis_button.pack(side=tk.RIGHT)
+        self.reset_left_hist_x_axis_button = tk.Button(left_hist_ui_frame, text="Reset Histogram", command=self.reset_left_hist_button)
+        self.reset_left_hist_x_axis_button.pack(side=tk.RIGHT)
 
         # Create the subplots within the figure
         self.left_hist_axes[0].hist([], bins=256, color='red', alpha=0.7, range=(left_min_value, left_max_value))
@@ -790,8 +807,8 @@ class SpectralCubeAnalysisTool:
         self.right_hist_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
         # Add a button to reset the histogram
-        self.reset_x_axis_button = tk.Button(right_hist_ui_frame, text="Reset Histogram", command=self.reset_right_hist_button)
-        self.reset_x_axis_button.pack(side=tk.RIGHT)
+        self.reset_right_hist_x_axis_button = tk.Button(right_hist_ui_frame, text="Reset Histogram", command=self.reset_right_hist_button)
+        self.reset_right_hist_x_axis_button.pack(side=tk.RIGHT)
 
         # Create the subplots within the figure
         self.right_hist_axes[0].hist([], bins=256, color='red', alpha=0.7, range=(right_min_value, right_max_value))
@@ -889,6 +906,89 @@ class SpectralCubeAnalysisTool:
 # ----------------------------------------------------------------
 # polygon functions
 # ----------------------------------------------------------------
+    def create_polygons_menu_window(self):
+        self.polygons_menu_window = tk.Toplevel(self.root)
+        self.polygons_menu_window.title("Polygons Menu")
+        
+        # Create a frame to hold UI elements with a fixed size
+        ui_frame = tk.Frame(self.polygons_menu_window)
+        ui_frame.grid(row=0,column=0, columnspan=6)
+
+        # create variables to track the row and column position of the buttons
+        self.polygons_menu_row = 0
+        self.polygons_menu_col = 0
+
+        # Create a button to toggle drawing polygons
+        self.draw_polygons_button = tk.Button(ui_frame, text="Drawing Polygons Off", command=self.toggle_polygons)
+        self.draw_polygons_button.grid(row=self.polygons_menu_row, column=self.polygons_menu_col)
+        self.polygons_menu_col += 1
+
+        # create a button to remove polygons from display
+        self.remove_polygons_button = tk.Button(ui_frame, text="Remove Polygons from Display", command=self.remove_polygons_from_display)
+        self.remove_polygons_button.grid(row=self.polygons_menu_row, column=self.polygons_menu_col)
+        self.polygons_menu_col += 1
+
+        # create a button to re-plot the polygons on the display
+        self.redraw_all_polygons_button = tk.Button(ui_frame, text="Re-draw Polygons on Display", command=self.draw_all_polygons)
+        self.redraw_all_polygons_button.grid(row=self.polygons_menu_row, column=self.polygons_menu_col)
+        self.polygons_menu_col += 1
+
+        # create a button to clear all polygons
+        self.clear_polygons_button = tk.Button(ui_frame, text="Delete All Polygons", command=self.clear_all_polygons)
+        self.clear_polygons_button.grid(row=self.polygons_menu_row, column=self.polygons_menu_col)
+        self.polygons_menu_col += 1
+
+        # create a button to extract spectra from polygons
+        self.extract_spectra_button = tk.Button(ui_frame, text="Plot Mean Spectra", command=self.extract_spectra_from_polygons)
+        self.extract_spectra_button.grid(row=self.polygons_menu_row, column=self.polygons_menu_col)
+        self.polygons_menu_col += 1
+
+        # create a dropdown menu to select the polygon color from a list of colors
+        self.polygon_color_var = tk.StringVar(ui_frame)
+        self.polygon_color_var.set("red") # default value
+        self.polygon_color_dropdown = tk.OptionMenu(ui_frame, self.polygon_color_var, "red", "green", "blue", "yellow", "orange", "purple", "pink", "brown", "black", "white")
+        self.polygon_color_dropdown.grid(row=self.polygons_menu_row, column=self.polygons_menu_col)
+        self.polygons_menu_row += 1
+
+        # create a table to display the polygon information
+        # # Create headers for the table
+        header_labels = ["Polygon Number", "Color", "Number of Points"]
+        for i, header_text in enumerate(header_labels):
+            header_label = tk.Label(self.polygons_menu_window, text=header_text)
+            header_label.grid(row=1, column=i)
+        
+        # get the information from the polygons to display in the table
+        self.update_polygons_table()
+
+    def update_polygons_table(self):
+        # get the information from the polygons to display in the table
+        self.polygons_table_data = []
+        for i, polygon in enumerate(self.all_polygons):
+            polygon_number = i
+            polygon_color = self.polygon_colors[i]
+            number_of_points = len(polygon)-1
+            self.polygons_table_data.append([polygon_number, polygon_color, number_of_points])
+        
+        # Populate the table with data
+        for i, row_data in enumerate(self.polygons_table_data):
+            for j, cell_value in enumerate(row_data):
+                cell_label = tk.Label(self.polygons_menu_window, text=cell_value)
+                cell_label.grid(row=i + 2, column=j)
+
+    def clear_polygons_table(self):
+        self.polygons_table_data = []
+        for i, polygon in enumerate(self.all_polygons):
+            polygon_number = None
+            polygon_color = None
+            number_of_points = None
+            self.polygons_table_data.append([polygon_number, polygon_color, number_of_points])
+        
+        # Populate the table with data
+        for i, row_data in enumerate(self.polygons_table_data):
+            for j, cell_value in enumerate(row_data):
+                cell_label = tk.Label(self.polygons_menu_window, text=cell_value)
+                cell_label.grid(row=i + 2, column=j)
+
     def toggle_polygons(self):
         if self.draw_polygons:
             self.draw_polygons = False
@@ -898,14 +998,15 @@ class SpectralCubeAnalysisTool:
             self.draw_polygons_button.config(text = "Drawing Polygons On", relief="raised")
 
     def draw_all_polygons(self):
-        for polygon in self.all_polygons:
+        for polygon_color, polygon in zip(self.polygon_colors, self.all_polygons):
             x, y = zip(*polygon)
-            self.left_ax.plot(x, y, 'ro')
-            self.right_ax.plot(x, y, 'ro')
-            self.left_ax.add_patch(Polygon(polygon, closed=True, fill=False, color='k'))
-            self.right_ax.add_patch(Polygon(polygon, closed=True, fill=False, color='k'))
+            # self.left_ax.plot(x, y, 'ro')
+            # self.right_ax.plot(x, y, 'ro')
+            self.left_ax.add_patch(Polygon(polygon, closed=True, facecolor=polygon_color,  edgecolor='k'))
+            self.right_ax.add_patch(Polygon(polygon, closed=True, facecolor=polygon_color, edgecolor='k'))
             self.left_canvas.draw()
             self.right_canvas.draw()
+            self.update_polygons_table()
 
     def remove_polygons_from_display(self):
         self.left_ax.clear()
@@ -917,7 +1018,12 @@ class SpectralCubeAnalysisTool:
         # Ask the user if they are sure
         answer = messagebox.askyesno("Confirmation", "Are you sure you want to delete all polygons?")
         if answer:
+            self.clear_polygons_table()
             self.all_polygons = []
+            self.polygon_colors = []
+            self.polygon_spectra = []
+            self.update_polygons_spectral_plot()
+            self.remove_polygons_from_display()
         else:
             pass
     
@@ -927,6 +1033,7 @@ class SpectralCubeAnalysisTool:
                 # get the indices of the pixels within the polygons
                 # left_row_indices = []
                 # left_col_indices = []
+                self.polygon_spectra = []
                 for polygon in self.all_polygons:
                     mask = np.zeros((self.left_data.nrows, self.left_data.ncols), dtype=np.uint8)
                     polygon_points_int = [(int(x), int(y)) for x, y in polygon]
@@ -934,6 +1041,11 @@ class SpectralCubeAnalysisTool:
                     # roi = self.left_data * mask
                     gstats = spectral.calc_stats(self.left_data, mask=mask, allow_nan=True)
                     mean_spectrum = gstats.mean
+                    # set values <=0 or >=1 to np.nan
+                    mean_spectrum = np.where(mean_spectrum < 0, np.nan, mean_spectrum)
+                    mean_spectrum = np.where(mean_spectrum > 1, np.nan, mean_spectrum)
+
+                    self.polygon_spectra.append(mean_spectrum)
 
                     # polygon = np.array(polygon)
                     # polygon = np.round(polygon).astype(int)
@@ -953,8 +1065,6 @@ class SpectralCubeAnalysisTool:
                     # spectrum = np.nanmean(spectrum, axis=1)
                     # spectrum = np.nan_to_num(spectrum)
 
-                    self.polygon_spectra.append(mean_spectrum)
-
                 # plot the spectra
                 self.update_polygons_spectral_plot()
             else:
@@ -972,9 +1082,10 @@ class SpectralCubeAnalysisTool:
                     if event.button == 1:
                         x, y = event.xdata, event.ydata
                         self.current_polygon.append((x, y))
-                        self.left_ax.plot(x, y, 'ro')
+                        point_color = self.polygon_color_var.get()
+                        self.left_ax.plot(x, y, color = point_color, marker='o')
                         self.left_canvas.draw()
-                        self.right_ax.plot(x, y, 'ro')
+                        self.right_ax.plot(x, y, color=point_color, marker='o')
                         self.right_canvas.draw()
                     elif event.button == 3:
                         if self.current_polygon:
@@ -987,15 +1098,27 @@ class SpectralCubeAnalysisTool:
                             # self.current_polygon = []
 
 
-                            # old version
+                            # working version
                             self.current_polygon.append(self.current_polygon[0]) #close the polygon
-                            self.left_ax.plot(*zip(*self.current_polygon), 'k-')
-                            self.left_canvas.draw()
-                            self.right_ax.plot(*zip(*self.current_polygon), 'k-')
-                            self.right_canvas.draw()
+                            polygon_color = self.polygon_color_var.get()
+
+                            self.left_ax.clear()
+                            self.right_ax.clear()
+                            self.update_left_display()
+                            self.update_right_display()
+
+                            # self.left_ax.plot(*zip(*self.current_polygon), facecolor=polygon_color, edgecolor = 'k')
+                            # self.left_canvas.draw()
+                            # self.right_ax.plot(*zip(*self.current_polygon), facecolor=polygon_color, edgecolor='k')
+                            # self.right_canvas.draw()
 
                             self.all_polygons.append(self.current_polygon)
+                            self.polygon_colors.append(polygon_color)
+                            self.draw_all_polygons()
+
                             self.current_polygon = []
+                            self.update_polygons_table()
+                            self.extract_spectra_from_polygons()
 
 
             elif event.inaxes == self.left_ax or event.inaxes == self.right_ax:
@@ -1187,6 +1310,7 @@ class SpectralCubeAnalysisTool:
 # ----------------------------------------------------------------
 # Spectral plotting area
 # ----------------------------------------------------------------
+    # polygons
     def create_polygons_spectral_plot(self):
         self.polygons_spectral_window = tk.Toplevel(self.root)
         self.polygons_spectral_window.title("ROI Spectral Plot")
@@ -1196,9 +1320,9 @@ class SpectralCubeAnalysisTool:
         ui_frame.pack(fill=tk.X)
 
         polygons_spectral_figure, self.polygons_spectral_ax = plt.subplots(figsize=(5,3))
-        for s in self.polygon_spectra:
+        for poly_color, s in zip(self.polygon_colors, self.polygon_spectra):
             s = s.flatten()
-            self.polygon_spectral_lines.append(self.polygons_spectral_ax.plot(self.left_wvl, s))
+            self.polygon_spectral_lines.append(self.polygons_spectral_ax.plot(self.left_wvl, s, color=poly_color))
         # self.polygon_spectral_lines, = self.polygons_spectral_ax.plot(self.left_wvl, self.polygon_spectra)
         xmin, xmax = self.polygons_spectral_ax.get_xlim()
         xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
@@ -1216,19 +1340,19 @@ class SpectralCubeAnalysisTool:
         self.polygons_spectral_canvas = FigureCanvasTkAgg(polygons_spectral_figure, master=self.polygons_spectral_window)
         self.polygons_spectral_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-        # # Add a button to reset x-axis span
-        # self.reset_x_axis_button = tk.Button(ui_frame, text="Reset X-Axis Span", command=self.reset_x_axis_span)
-        # self.reset_x_axis_button.pack(side=tk.RIGHT)
+        # Add a button to reset x-axis span
+        self.reset_polygons_x_axis_button = tk.Button(ui_frame, text="Reset X-Axis Span", command=self.reset_polygons_x_axis_span)
+        self.reset_polygons_x_axis_button.pack(side=tk.RIGHT)
 
-        # # Add built-in span options to a dropdown menu
-        # span_options = ["Full Span", "410 - 1000 nm", "1000 - 2600 nm", "1200 - 2000 nm", "1800 - 2500 nm", "2000 - 2500 nm", "2700 - 3900 nm"]
-        # self.polygons_span_var = tk.StringVar()
-        # self.polygons_span_var.set("Full Span")  # Set the default span option
-        # span_menu = ttk.Combobox(ui_frame, textvariable=self.polygons_span_var, values=span_options, state="readonly")
-        # span_menu.pack(side=tk.RIGHT)
+        # Add built-in span options to a dropdown menu
+        span_options = ["Full Span", "410 - 1000 nm", "1000 - 2600 nm", "1200 - 2000 nm", "1800 - 2500 nm", "2000 - 2500 nm", "2700 - 3900 nm"]
+        self.polygons_span_var = tk.StringVar()
+        self.polygons_span_var.set("Full Span")  # Set the default span option
+        span_menu = ttk.Combobox(ui_frame, textvariable=self.polygons_span_var, values=span_options, state="readonly")
+        span_menu.pack(side=tk.RIGHT)
 
-        # # Bind an event to update the x-axis span when a span option is selected
-        # span_menu.bind("<<ComboboxSelected>>", self.update_x_axis_span)
+        # Bind an event to update the x-axis span when a span option is selected
+        span_menu.bind("<<ComboboxSelected>>", self.update_polygons_x_axis_span)
 
         # Create a toolbar for the spectral plot
         toolbar = NavigationToolbar2Tk(self.polygons_spectral_canvas, self.polygons_spectral_window)
@@ -1236,16 +1360,20 @@ class SpectralCubeAnalysisTool:
         self.polygons_spectral_canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         
         # Add span selector for x-axis
-        # self.create_x_axis_span_selector(self.left_wvl)
+        self.create_polygons_x_axis_span_selector(self.left_wvl)
     
     def update_polygons_spectral_plot(self):
         if self.polygons_spectral_window is None or not self.polygons_spectral_window.winfo_exists():
             self.polygon_spectral_lines = []
             self.create_polygons_spectral_plot()
-        else:
-            for s in self.polygon_spectra:
+        elif self.polygon_spectra:
+            # clear everything from the plot before plotting
+            self.polygons_spectral_ax.clear()
+            self.polygon_spectral_lines = []
+
+            for c, s in zip(self.polygon_colors, self.polygon_spectra):
                 s = s.flatten()
-                self.polygon_spectral_lines.append(self.polygons_spectral_ax.plot(self.left_wvl, s))
+                self.polygon_spectral_lines.append(self.polygons_spectral_ax.plot(self.left_wvl, s, color=c))
             xmin, xmax = self.polygons_spectral_ax.get_xlim()
             xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
             xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
@@ -1259,20 +1387,83 @@ class SpectralCubeAnalysisTool:
             buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
             self.polygons_spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
             self.polygons_spectral_canvas.draw()
-    
-    def update_spectral_plot(self):
-        if self.spectral_window is None or not self.spectral_window.winfo_exists():
-            self.create_spectral_plot()
         else:
-            self.spectral_line.set_ydata(self.spectrum)
-            xmin, xmax = self.spectral_ax.get_xlim()
-            xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
-            xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
-            min_y, max_y = np.nanmin(self.spectrum[xmin_idx:xmax_idx]), np.nanmax(self.spectrum[xmin_idx:xmax_idx])
-            buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
-            self.spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
-            self.spectral_canvas.draw()
+            self.polygons_spectral_ax.clear()
+            self.polygons_spectral_canvas.draw()
+    
+    def reset_polygons_x_axis_span(self):
+        # Reset x-axis span to the default range
+        self.polygons_spectral_ax.set_xlim(self.left_wvl[0], self.left_wvl[-1])
+        xmin, xmax = self.polygons_spectral_ax.get_xlim()
+        xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
+        xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
+        all_min_y = []
+        all_max_y = []
+        for s in self.polygon_spectra:
+            min_y, max_y = np.nanmin(s[xmin_idx:xmax_idx]), np.nanmax(s[xmin_idx:xmax_idx])
+            all_min_y.append(min_y)
+            all_max_y.append(max_y)
+        min_y, max_y = np.nanmin(all_min_y), np.nanmax(all_max_y)
+        buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
+        self.polygons_spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
+        self.polygons_spectral_canvas.draw()
 
+    def update_polygons_x_axis_span(self, event):
+        selected_span = self.polygons_span_var.get()
+        # Map the selected span to its corresponding x-axis limits
+        span_ranges = {
+            "Full Span": (self.left_wvl[0], self.left_wvl[-1]),
+            "410 - 1000 nm": (410, 1000),
+            "1000 - 2600 nm": (1000, 2600),
+            "1200 - 2000 nm": (1200, 2000),
+            "1800 - 2500 nm": (1800, 2500),
+            "2000 - 2500 nm": (2000, 2500),
+            "2700 - 3900 nm": (2700, 3900)
+        }
+        if selected_span in span_ranges:
+            xlim = span_ranges[selected_span]
+            self.polygons_spectral_ax.set_xlim(xlim[0], xlim[1])
+            xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xlim[0]))
+            xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xlim[1]))
+
+            # Calculate y-limits based on the data within the new span
+            all_min_y = []
+            all_max_y = []
+            for s in self.polygon_spectra:
+                min_y, max_y = np.nanmin(s[xmin_idx:xmax_idx]), np.nanmax(s[xmin_idx:xmax_idx])
+                all_min_y.append(min_y)
+                all_max_y.append(max_y)
+            min_y, max_y = np.nanmin(all_min_y), np.nanmax(all_max_y)
+
+            buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
+            self.polygons_spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
+
+            self.polygons_spectral_canvas.draw()
+
+    def create_polygons_x_axis_span_selector(self, x_data):
+        def on_x_span_select(xmin, xmax):
+            xmin_idx = np.argmin(np.abs(x_data - xmin))
+            xmax_idx = np.argmin(np.abs(x_data - xmax))
+            self.polygons_spectral_ax.set_xlim(x_data[xmin_idx], x_data[xmax_idx])
+
+            # Calculate y-limits based on the data within the new span
+            all_min_y = []
+            all_max_y = []
+            for s in self.polygon_spectra:
+                min_y, max_y = np.nanmin(s[xmin_idx:xmax_idx]), np.nanmax(s[xmin_idx:xmax_idx])
+                all_min_y.append(min_y)
+                all_max_y.append(max_y)
+            min_y, max_y = np.nanmin(all_min_y), np.nanmax(all_max_y)
+
+            buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
+            self.polygons_spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
+
+            self.polygons_spectral_canvas.draw()
+
+        self.x_polygons_span_selector = SpanSelector(
+            self.polygons_spectral_ax, on_x_span_select, 'horizontal', useblit=True)
+
+    # points
     def create_spectral_plot(self):
         self.spectral_window = tk.Toplevel(self.root)
         self.spectral_window.title("Spectral Plot")
@@ -1294,8 +1485,8 @@ class SpectralCubeAnalysisTool:
         self.spectral_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
         # Add a button to reset x-axis span
-        self.reset_x_axis_button = tk.Button(ui_frame, text="Reset X-Axis Span", command=self.reset_x_axis_span)
-        self.reset_x_axis_button.pack(side=tk.RIGHT)
+        self.reset_spectral_x_axis_button = tk.Button(ui_frame, text="Reset X-Axis Span", command=self.reset_x_axis_span)
+        self.reset_spectral_x_axis_button.pack(side=tk.RIGHT)
 
         # Add built-in span options to a dropdown menu
         span_options = ["Full Span", "410 - 1000 nm", "1000 - 2600 nm", "1200 - 2000 nm", "1800 - 2500 nm", "2000 - 2500 nm", "2700 - 3900 nm"]
@@ -1315,19 +1506,76 @@ class SpectralCubeAnalysisTool:
         # Add span selector for x-axis
         self.create_x_axis_span_selector(self.left_wvl)
 
-    def update_ratio_spectral_plot(self):
-        if self.ratio_spectral_window is None or not self.ratio_spectral_window.winfo_exists():
-            self.create_ratio_spectral_plot()
+    def update_spectral_plot(self):
+        if self.spectral_window is None or not self.spectral_window.winfo_exists():
+            self.create_spectral_plot()
         else:
-            self.ratio_spectral_line.set_ydata(self.ratio_spectrum)
-            xmin, xmax = self.ratio_spectral_ax.get_xlim()
+            self.spectral_line.set_ydata(self.spectrum)
+            xmin, xmax = self.spectral_ax.get_xlim()
             xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
             xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
-            min_y, max_y = np.nanmin(self.ratio_spectrum[xmin_idx:xmax_idx]), np.nanmax(self.ratio_spectrum[xmin_idx:xmax_idx])
+            min_y, max_y = np.nanmin(self.spectrum[xmin_idx:xmax_idx]), np.nanmax(self.spectrum[xmin_idx:xmax_idx])
             buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
-            self.ratio_spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
-            self.ratio_spectral_canvas.draw()
+            self.spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
+            self.spectral_canvas.draw()
 
+    def reset_x_axis_span(self):
+        # Reset x-axis span to the default range
+        self.spectral_ax.set_xlim(self.left_wvl[0], self.left_wvl[-1])
+        xmin, xmax = self.spectral_ax.get_xlim()
+        xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
+        xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
+        min_y, max_y = np.nanmin(self.spectrum[xmin_idx:xmax_idx]), np.nanmax(self.spectrum[xmin_idx:xmax_idx])
+        buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
+        self.spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
+        self.spectral_canvas.draw()
+
+    def update_x_axis_span(self, event):
+        selected_span = self.span_var.get()
+        # Map the selected span to its corresponding x-axis limits
+        span_ranges = {
+            "Full Span": (self.left_wvl[0], self.left_wvl[-1]),
+            "410 - 1000 nm": (410, 1000),
+            "1000 - 2600 nm": (1000, 2600),
+            "1200 - 2000 nm": (1200, 2000),
+            "1800 - 2500 nm": (1800, 2500),
+            "2000 - 2500 nm": (2000, 2500),
+            "2700 - 3900 nm": (2700, 3900)
+        }
+        if selected_span in span_ranges:
+            xlim = span_ranges[selected_span]
+            self.spectral_ax.set_xlim(xlim[0], xlim[1])
+            xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xlim[0]))
+            xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xlim[1]))
+
+            # Calculate y-limits based on the data within the new span
+            y_min = np.nanmin(self.spectrum[xmin_idx:xmax_idx])
+            y_max = np.nanmax(self.spectrum[xmin_idx:xmax_idx])
+
+            buffer = (y_max - y_min) * 0.1  # Add a buffer to y-limits
+            self.spectral_ax.set_ylim(y_min - buffer, y_max + buffer)
+
+            self.spectral_canvas.draw()
+
+    def create_x_axis_span_selector(self, x_data):
+        def on_x_span_select(xmin, xmax):
+            xmin_idx = np.argmin(np.abs(x_data - xmin))
+            xmax_idx = np.argmin(np.abs(x_data - xmax))
+            self.spectral_ax.set_xlim(x_data[xmin_idx], x_data[xmax_idx])
+
+            # Calculate y-limits based on the data within the new span
+            y_min = np.nanmin(self.spectrum[xmin_idx:xmax_idx])
+            y_max = np.nanmax(self.spectrum[xmin_idx:xmax_idx])
+
+            buffer = (y_max - y_min) * 0.1  # Add a buffer to y-limits
+            self.spectral_ax.set_ylim(y_min - buffer, y_max + buffer)
+
+            self.spectral_canvas.draw()
+
+        self.x_span_selector = SpanSelector(
+            self.spectral_ax, on_x_span_select, 'horizontal', useblit=True)
+
+    # ratio plots
     def create_ratio_spectral_plot(self):
         self.ratio_spectral_window = tk.Toplevel(self.root)
         self.ratio_spectral_window.title("Ratio Spectral Plot")
@@ -1370,16 +1618,18 @@ class SpectralCubeAnalysisTool:
         # Add span selector for x-axis
         self.create_ratio_x_axis_span_selector(self.left_wvl)
 
-    def reset_x_axis_span(self):
-        # Reset x-axis span to the default range
-        self.spectral_ax.set_xlim(self.left_wvl[0], self.left_wvl[-1])
-        xmin, xmax = self.spectral_ax.get_xlim()
-        xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
-        xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
-        min_y, max_y = np.nanmin(self.spectrum[xmin_idx:xmax_idx]), np.nanmax(self.spectrum[xmin_idx:xmax_idx])
-        buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
-        self.spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
-        self.spectral_canvas.draw()
+    def update_ratio_spectral_plot(self):
+        if self.ratio_spectral_window is None or not self.ratio_spectral_window.winfo_exists():
+            self.create_ratio_spectral_plot()
+        else:
+            self.ratio_spectral_line.set_ydata(self.ratio_spectrum)
+            xmin, xmax = self.ratio_spectral_ax.get_xlim()
+            xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
+            xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
+            min_y, max_y = np.nanmin(self.ratio_spectrum[xmin_idx:xmax_idx]), np.nanmax(self.ratio_spectrum[xmin_idx:xmax_idx])
+            buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
+            self.ratio_spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
+            self.ratio_spectral_canvas.draw()
 
     def reset_ratio_x_axis_span(self):
         # Reset x-axis span to the default range
@@ -1391,33 +1641,6 @@ class SpectralCubeAnalysisTool:
         buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
         self.ratio_spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
         self.ratio_spectral_canvas.draw()
-
-    def update_x_axis_span(self, event):
-        selected_span = self.span_var.get()
-        # Map the selected span to its corresponding x-axis limits
-        span_ranges = {
-            "Full Span": (self.left_wvl[0], self.left_wvl[-1]),
-            "410 - 1000 nm": (410, 1000),
-            "1000 - 2600 nm": (1000, 2600),
-            "1200 - 2000 nm": (1200, 2000),
-            "1800 - 2500 nm": (1800, 2500),
-            "2000 - 2500 nm": (2000, 2500),
-            "2700 - 3900 nm": (2700, 3900)
-        }
-        if selected_span in span_ranges:
-            xlim = span_ranges[selected_span]
-            self.spectral_ax.set_xlim(xlim[0], xlim[1])
-            xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xlim[0]))
-            xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xlim[1]))
-
-            # Calculate y-limits based on the data within the new span
-            y_min = np.nanmin(self.spectrum[xmin_idx:xmax_idx])
-            y_max = np.nanmax(self.spectrum[xmin_idx:xmax_idx])
-
-            buffer = (y_max - y_min) * 0.1  # Add a buffer to y-limits
-            self.spectral_ax.set_ylim(y_min - buffer, y_max + buffer)
-
-            self.spectral_canvas.draw()
 
     def update_ratio_x_axis_span(self, event):
         selected_span = self.ratio_span_var.get()
@@ -1446,24 +1669,6 @@ class SpectralCubeAnalysisTool:
 
             self.ratio_spectral_canvas.draw()
 
-    def create_x_axis_span_selector(self, x_data):
-        def on_x_span_select(xmin, xmax):
-            xmin_idx = np.argmin(np.abs(x_data - xmin))
-            xmax_idx = np.argmin(np.abs(x_data - xmax))
-            self.spectral_ax.set_xlim(x_data[xmin_idx], x_data[xmax_idx])
-
-            # Calculate y-limits based on the data within the new span
-            y_min = np.nanmin(self.spectrum[xmin_idx:xmax_idx])
-            y_max = np.nanmax(self.spectrum[xmin_idx:xmax_idx])
-
-            buffer = (y_max - y_min) * 0.1  # Add a buffer to y-limits
-            self.spectral_ax.set_ylim(y_min - buffer, y_max + buffer)
-
-            self.spectral_canvas.draw()
-
-        self.x_span_selector = SpanSelector(
-            self.spectral_ax, on_x_span_select, 'horizontal', useblit=True)
-
     def create_ratio_x_axis_span_selector(self, x_data):
         def on_x_span_select(xmin, xmax):
             xmin_idx = np.argmin(np.abs(x_data - xmin))
@@ -1486,6 +1691,6 @@ if __name__ == "__main__":
     def on_closing():
         root.destroy()
     root = tk.Tk()
-    app = SpectralCubeAnalysisTool(root)
     root.protocol("WM_DELETE_WINDOW", on_closing)
+    app = SpectralCubeAnalysisTool(root)
     root.mainloop()
