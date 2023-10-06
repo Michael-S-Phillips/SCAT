@@ -41,7 +41,7 @@ The code includes a TODO list of features and improvements to be implemented in 
 # Installaing
 ```bash
 git clone git@github.com:Michael-S-Phillips/SCAT.git
-conda env create -f environment.yaml
+conda env create -f environment.yml
 ```
 
 To use the `SpectralCubeAnalysisTool` class, you can follow these steps:
