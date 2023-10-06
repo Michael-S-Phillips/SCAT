@@ -9,6 +9,9 @@ import numpy as np
 import rasterio as rio
 import cv2
 
+import geopandas as gpd
+from shapely.geometry import Polygon as sgp
+
 class SpectralCubeAnalysisTool:
     '''
     TODO:
@@ -60,7 +63,7 @@ class SpectralCubeAnalysisTool:
 
         # Create a label to display coordinates
         self.coordinates_label = tk.Label(self.main_ui_frame, text="Lat: 0.0000, Lon: 0.0000")
-        self.coordinates_label.grid(row=0, column=0, columnspan=2, sticky="new")
+        self.coordinates_label.grid(row=0, column=0, columnspan=2, sticky="nsew")
         # self.coordinates_label.grid_rowconfigure(row=0, weight=0)
 
         # frame for the buttons on the righthand side
@@ -78,22 +81,6 @@ class SpectralCubeAnalysisTool:
         # Add a button to draw polygons
         self.draw_polygons_button = tk.Button(self.right_buttons_frame, text="Draw Polygons", command=self.create_polygons_menu_window)
         self.draw_polygons_button.grid(row=1, column=0, sticky = 'new')
-
-        # # Add a button to clear polygons from display
-        # self.clear_polygons_button = tk.Button(self.right_buttons_frame, text="Clear Polygons From Display", command=self.remove_polygons_from_display)
-        # self.clear_polygons_button.grid(row=2, column=0, sticky = 'new')
-
-        # # Add a button to redraw the polgyons
-        # self.redraw_polygons_button = tk.Button(self.right_buttons_frame, text="Redraw Polygons", command=self.draw_all_polygons)
-        # self.redraw_polygons_button.grid(row=3, column=0, sticky = 'new')
-
-        # # Add a button to clear all polygons
-        # self.redraw_polygons_button = tk.Button(self.right_buttons_frame, text="Delete Polygons", command=self.clear_all_polygons)
-        # self.redraw_polygons_button.grid(row=4, column=0, sticky = 'new')
-
-        # # Add a button to plot spectra from all polygons
-        # self.plot_polygon_spectra_button = tk.Button(self.right_buttons_frame, text="Plot Mean Spectra of Polygons", command=self.extract_spectra_from_polygons)
-        # self.plot_polygon_spectra_button.grid(row=5, column=0, sticky = 'new')
 
         # Create a sub-frame for the left canvas buttons
         self.button_frame = tk.Frame(self.main_ui_frame)
@@ -163,8 +150,9 @@ class SpectralCubeAnalysisTool:
         self.apply_stretch_button = tk.Button(self.button_frame, text="Apply Stretch", command=self.update_left_display)
         self.apply_stretch_button.grid(row=10, column=0, columnspan=2, sticky=tk.W)
 
-        # 
+        # ----------------------------------------------------------------
         # Create a sub-frame for the right canvas buttons
+        # ----------------------------------------------------------------
         self.button_frame = tk.Frame(self.main_ui_frame)
         self.button_frame.grid(row=2, column=1, sticky=tk.N + tk.S + tk.W + tk.E)  # Use grid and place it in column 1
         self.main_ui_frame.grid_rowconfigure(0, weight=1)  # Allow row 0 to expand vertically with window resize
@@ -912,7 +900,7 @@ class SpectralCubeAnalysisTool:
         
         # Create a frame to hold UI elements with a fixed size
         ui_frame = tk.Frame(self.polygons_menu_window)
-        ui_frame.grid(row=0,column=0, columnspan=6)
+        ui_frame.grid(row=0,column=0, columnspan=7)
 
         # create variables to track the row and column position of the buttons
         self.polygons_menu_row = 0
@@ -941,6 +929,11 @@ class SpectralCubeAnalysisTool:
         # create a button to extract spectra from polygons
         self.extract_spectra_button = tk.Button(ui_frame, text="Plot Mean Spectra", command=self.extract_spectra_from_polygons)
         self.extract_spectra_button.grid(row=self.polygons_menu_row, column=self.polygons_menu_col)
+        self.polygons_menu_col += 1
+
+        # create a button to save the ROIs
+        self.save_rois_button = tk.Button(ui_frame, text="Save ROIs", command=self.save_polygons)
+        self.save_rois_button.grid(row=self.polygons_menu_row, column=self.polygons_menu_col)
         self.polygons_menu_col += 1
 
         # create a dropdown menu to select the polygon color from a list of colors
@@ -1071,7 +1064,24 @@ class SpectralCubeAnalysisTool:
                 messagebox.showwarning("Warning", "No polygons drawn. Draw polygons first.")
         else:
             messagebox.showwarning("Warning", "No data loaded. Load hyperspectral data first into left frame.")
-            
+
+    def save_polygons(self):
+        if self.all_polygons:
+            # get the filename to save the polygons to
+            filename = filedialog.asksaveasfilename(initialdir = "/",title = "Select file")#,filetypes = (("shp files","*.shp")))
+            if filename:
+                # save the polygons using geopandas and shapely.geometry
+                all_geo_poly_coords = []
+                for poly_coords in self.all_polygons:
+                    geo_poly_coords = [self.left_rio.xy(y, x) for x, y in poly_coords]
+                    all_geo_poly_coords.append(geo_poly_coords)
+                polygon_geometries = [sgp(poly_coords) for poly_coords in all_geo_poly_coords]
+
+                # create a GeoDataFrame
+                polygons_gdf = gpd.GeoDataFrame({'color': self.polygon_colors}, geometry=polygon_geometries, crs=self.left_rio.crs)
+                polygons_gdf.to_file(filename)
+        else:
+            messagebox.showwarning("Warning", "No polygons drawn. Draw polygons first.")        
 # ----------------------------------------------------------------
 # canvas click functionality
 # ----------------------------------------------------------------
@@ -1089,16 +1099,7 @@ class SpectralCubeAnalysisTool:
                         self.right_canvas.draw()
                     elif event.button == 3:
                         if self.current_polygon:
-                            # polygon = Polygon(self.current_polygon, closed=True, fill=False, color='k')
-                            # self.left_ax.add_patch(polygon)
-                            # self.left_canvas.draw()
-                            # self.right_ax.add_patch(polygon)
-                            # self.right_canvas.draw()
-                            # self.all_polygons.append(self.current_polygon)
-                            # self.current_polygon = []
 
-
-                            # working version
                             self.current_polygon.append(self.current_polygon[0]) #close the polygon
                             polygon_color = self.polygon_color_var.get()
 
@@ -1106,11 +1107,6 @@ class SpectralCubeAnalysisTool:
                             self.right_ax.clear()
                             self.update_left_display()
                             self.update_right_display()
-
-                            # self.left_ax.plot(*zip(*self.current_polygon), facecolor=polygon_color, edgecolor = 'k')
-                            # self.left_canvas.draw()
-                            # self.right_ax.plot(*zip(*self.current_polygon), facecolor=polygon_color, edgecolor='k')
-                            # self.right_canvas.draw()
 
                             self.all_polygons.append(self.current_polygon)
                             self.polygon_colors.append(polygon_color)
@@ -1146,9 +1142,9 @@ class SpectralCubeAnalysisTool:
 
     def on_canvas_motion(self, event):
         if hasattr(self, "left_data") and event.inaxes:
-            # latitude, longitude = event.xdata, event.ydata
-            lon = (event.xdata - self.left_data.ncols/2)*self.x_dpp + float(self.proj_info[3])
-            lat = ((self.left_data.nrows/2) - event.ydata )*self.y_dpp + float(self.proj_info[2])
+            lon, lat = self.left_rio.xy(event.ydata, event.xdata)
+            # lon = (event.xdata - self.left_data.ncols/2)*self.x_dpp + float(self.proj_info[3])
+            # lat = ((self.left_data.nrows/2) - event.ydata )*self.y_dpp + float(self.proj_info[2])
             coordinate_text = f"Lat: {lat:.4f}, Lon: {lon:.4f}"
             self.coordinates_label.config(text=coordinate_text)
             self.left_canvas.draw()
