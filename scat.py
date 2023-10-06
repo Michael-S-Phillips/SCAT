@@ -23,9 +23,15 @@ class SpectralCubeAnalysisTool:
             > ability to cancel a polygon in the middle of drawing
             > a way to interact with polygons in a table format (edit names and colors)
             > speed up mean spectra plotting
-        - Spectral smoothing routines
+        - Spectral plotting
+            > add ability to save plots at figure quality
+            > spectral smoothing routines (Rogers for CRISM, generic smoothing)
+            > add ability to plot multiple spectra on the same plot for point and click spectra
+            > add ability to plot library spectra
+            > add ability to offset for clarity
         - Adding basic spectral analysis workflows, such as MNF and HyPyRameter
         - Add default Browse product combos for parameter display
+        - Add ability to save statistics from parameter file over ROIs
 
     This class creates a GUI for analyzing hyperspectral data. It allows the user to load a hyperspectral and analyze an image 
     '''
@@ -938,7 +944,7 @@ class SpectralCubeAnalysisTool:
         self.polygons_menu_col += 1
 
         # create a button to extract spectra from polygons
-        self.extract_spectra_button = tk.Button(ui_frame, text="Plot Mean Spectra", command=self.extract_spectra_from_polygons)
+        self.extract_spectra_button = tk.Button(ui_frame, text="Plot Mean Spectra", command=self.update_polygons_spectral_plot)
         self.extract_spectra_button.grid(row=self.polygons_menu_row, column=self.polygons_menu_col)
         self.polygons_menu_col += 1
 
@@ -1093,6 +1099,7 @@ class SpectralCubeAnalysisTool:
                 polygons_gdf.to_file(filename)
         else:
             messagebox.showwarning("Warning", "No polygons drawn. Draw polygons first.")        
+
 # ----------------------------------------------------------------
 # canvas click functionality
 # ----------------------------------------------------------------
@@ -1318,6 +1325,7 @@ class SpectralCubeAnalysisTool:
 # Spectral plotting area
 # ----------------------------------------------------------------
     # polygons
+    # ----------------------------------------------------------------
     def create_polygons_spectral_plot(self):
         self.polygons_spectral_window = tk.Toplevel(self.root)
         self.polygons_spectral_window.title("ROI Spectral Plot")
@@ -1472,6 +1480,7 @@ class SpectralCubeAnalysisTool:
     
     # ----------------------------------------------------------------
     # points
+    # ----------------------------------------------------------------
     def create_spectral_plot(self):
         self.spectral_window = tk.Toplevel(self.root)
         self.spectral_window.title("Spectral Plot")
@@ -1585,6 +1594,7 @@ class SpectralCubeAnalysisTool:
     
     # ----------------------------------------------------------------
     # ratio plots
+    # ----------------------------------------------------------------
     def create_ratio_spectral_plot(self):
         self.ratio_spectral_window = tk.Toplevel(self.root)
         self.ratio_spectral_window.title("Ratio Spectral Plot")
@@ -1695,6 +1705,7 @@ class SpectralCubeAnalysisTool:
 
         self.ratio_x_span_selector = SpanSelector(
             self.ratio_spectral_ax, on_x_span_select, 'horizontal', useblit=True)
+
 # ----------------------------------------------------------------
 # saving and closing functions
 # ----------------------------------------------------------------
@@ -1722,7 +1733,7 @@ class SpectralCubeAnalysisTool:
             with open(file_path, 'wb') as file:
                 pickle.dump(state_dict, file)
 
-    def on_closing():
+    def on_closing(self):
         root.destroy()
 
     def load_state(self):
