@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+import pickle
 from matplotlib.widgets import SpanSelector
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
@@ -15,14 +16,20 @@ from shapely.geometry import Polygon as sgp
 class SpectralCubeAnalysisTool:
     '''
     TODO:
-        - Adding more functionality to the polygon shape layer drawing.
-        - Exporting polygons as GIS-readable shape layers.
+        - Adding more functionality to the polygon shape layer drawing:
+            > naming polygons
+            > better ability to edit individual polygons
+            > ability to delete individual polygons
+            > ability to cancel a polygon in the middle of drawing
+            > a way to interact with polygons in a table format (edit names and colors)
+            > speed up mean spectra plotting
         - Spectral smoothing routines
-        - Adding basic spectral analysis workflows, such as MNF
-        - Add default RGB values for parameter image visualization mapped to Browse product combos
+        - Adding basic spectral analysis workflows, such as MNF and HyPyRameter
+        - Add default Browse product combos for parameter display
 
     This class creates a GUI for analyzing hyperspectral data. It allows the user to load a hyperspectral and analyze an image 
     '''
+
     def __init__(self, root):
         '''
         Initializes the GUI and creates the main UI elements.
@@ -233,6 +240,8 @@ class SpectralCubeAnalysisTool:
         file_menu.add_command(label="Load Hyperspectral Cube", command=self.load_left_data)
         file_menu.add_command(label="Load Band Parameter Image", command=self.load_right_data)
         file_menu.add_separator()
+        file_menu.add_command(label = "Load Session", command=self.load_state)
+        file_menu.add_command(label = "Save", command=self.save_state)
         file_menu.add_command(label="Exit", command=self.root.quit)
         
         hitogram_menu = tk.Menu(menubar, tearoff=0)
@@ -355,8 +364,9 @@ class SpectralCubeAnalysisTool:
 # ----------------------------------------------------------------
 # loading the data
 # ----------------------------------------------------------------
-    def load_left_data(self):
-        file_path = filedialog.askopenfilename(filetypes=[("ENVI Files", "*.hdr")])
+    def load_left_data(self, file_path = None):
+        if not file_path:
+            file_path = filedialog.askopenfilename(filetypes=[("ENVI Files", "*.hdr")])
         if file_path:
             self.left_data = spectral.io.envi.open(file_path)
             rio_path = file_path.replace("hdr", "img")
@@ -376,8 +386,9 @@ class SpectralCubeAnalysisTool:
             self.create_left_scroll_bars()
             self.display_left_data(self.default_rgb_bands)
 
-    def load_right_data(self):
-        file_path = filedialog.askopenfilename(filetypes=[("ENVI Files", "*.hdr")])
+    def load_right_data(self, file_path = None):
+        if not file_path:
+            file_path = filedialog.askopenfilename(filetypes=[("ENVI Files", "*.hdr")])
         if file_path:
             self.right_data = spectral.io.envi.open(file_path)
             self.populate_right_wavelength_menus()
@@ -1458,7 +1469,8 @@ class SpectralCubeAnalysisTool:
 
         self.x_polygons_span_selector = SpanSelector(
             self.polygons_spectral_ax, on_x_span_select, 'horizontal', useblit=True)
-
+    
+    # ----------------------------------------------------------------
     # points
     def create_spectral_plot(self):
         self.spectral_window = tk.Toplevel(self.root)
@@ -1570,7 +1582,8 @@ class SpectralCubeAnalysisTool:
 
         self.x_span_selector = SpanSelector(
             self.spectral_ax, on_x_span_select, 'horizontal', useblit=True)
-
+    
+    # ----------------------------------------------------------------
     # ratio plots
     def create_ratio_spectral_plot(self):
         self.ratio_spectral_window = tk.Toplevel(self.root)
@@ -1682,11 +1695,58 @@ class SpectralCubeAnalysisTool:
 
         self.ratio_x_span_selector = SpanSelector(
             self.ratio_spectral_ax, on_x_span_select, 'horizontal', useblit=True)
+# ----------------------------------------------------------------
+# saving and closing functions
+# ----------------------------------------------------------------
+    def save_state(self):
+        # Ask the user to choose the file name and location
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".pkl",  # Default extension for your serialized data
+            filetypes=[("Pickle files", "*.pkl")],  # Filter for pickle files
+        )
 
-if __name__ == "__main__":
+        if file_path:
+            # Create a dictionary to store the relevant attributes
+            state_dict = {
+                "left_file": self.left_data.filename.replace(".img", ".hdr"),
+                "right_file": self.right_data.filename.replace(".img", ".hdr"),
+                "all_polygons": self.all_polygons,
+                "polygon_colors": self.polygon_colors,
+                "polygon_spectra": self.polygon_spectra,
+                "spectrum": self.spectrum,
+                "ratio_spectrum": self.ratio_spectrum,
+
+            }
+
+            # Serialize and save the state dictionary to the chosen file
+            with open(file_path, 'wb') as file:
+                pickle.dump(state_dict, file)
+
     def on_closing():
         root.destroy()
+
+    def load_state(self):
+        # Ask the user to choose the saved session file
+        file_path = filedialog.askopenfilename(
+            filetypes=[("Pickle files", "*.pkl")],  # Filter for pickle files
+        )
+
+        if file_path:
+            # Load the saved state from the chosen file
+            with open(file_path, 'rb') as file:
+                restored_instance = pickle.load(file)
+
+            # Update the current instance with the restored state
+            self.load_left_data(restored_instance['left_file'])
+            self.load_right_data(restored_instance['right_file'])
+            self.all_polygons = restored_instance['all_polygons']
+            self.polygon_colors = restored_instance['polygon_colors']
+            self.polygon_spectra = restored_instance['polygon_spectra']
+            self.spectrum = restored_instance['spectrum']
+            self.ratio_spectrum = restored_instance['ratio_spectrum']
+
+if __name__ == "__main__":
     root = tk.Tk()
-    root.protocol("WM_DELETE_WINDOW", on_closing)
     app = SpectralCubeAnalysisTool(root)
+    root.protocol("WM_DELETE_WINDOW", app.on_closing)
     root.mainloop()
