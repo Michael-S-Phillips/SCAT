@@ -1073,6 +1073,9 @@ class SpectralCubeAnalysisTool:
             save_button = ttk.Button(edit_window, text="Save", command=save_and_close)
             save_button.pack()
 
+            # Bind the "Return" key to the "Save" button's functionality
+            edit_window.bind("<Return>", lambda event: save_and_close())
+
             # Focus on the Entry widget
             edit_entry.focus_set()
 
