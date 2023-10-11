@@ -16,13 +16,14 @@ from shapely.geometry import Polygon as sgp
 class SpectralCubeAnalysisTool:
     '''
     TODO:
-        - Adding more functionality to the polygon shape layer drawing:
+        - Adding more functionality to the polygon shape layer tool:
             > naming polygons
             > better ability to edit individual polygons
             > ability to delete individual polygons
             > ability to cancel a polygon in the middle of drawing
             > a way to interact with polygons in a table format (edit names and colors)
             > speed up mean spectra plotting
+            > add ability to import shape files
         - Spectral plotting
             > add ability to save plots at figure quality
             > spectral smoothing routines (Rogers for CRISM, generic smoothing)
@@ -41,7 +42,7 @@ class SpectralCubeAnalysisTool:
         Initializes the GUI and creates the main UI elements.
         '''
         self.root = root
-        self.root.title("Hyperspectral Image Analyzer")
+        self.root.title("Spectral Cube Analysis Tool")
 
         self.default_rgb_bands = [29, 19, 9]  # Default bands for RGB display of spectral data
         self.default_parameter_bands = [15, 18, 19]  # Default bands for RGB display of parameter data, MAF
@@ -63,6 +64,8 @@ class SpectralCubeAnalysisTool:
         self.all_polygons = []
         self.polygon_colors = []
         self.polygon_spectra = []
+        self.spectrum = []
+        self.ratio_spectrum = []
 
     def create_main_ui(self):
         '''
@@ -247,7 +250,7 @@ class SpectralCubeAnalysisTool:
         file_menu.add_command(label="Load Band Parameter Image", command=self.load_right_data)
         file_menu.add_separator()
         file_menu.add_command(label = "Load Session", command=self.load_state)
-        file_menu.add_command(label = "Save", command=self.save_state)
+        file_menu.add_command(label = "Save Session", command=self.save_state)
         file_menu.add_command(label="Exit", command=self.root.quit)
         
         hitogram_menu = tk.Menu(menubar, tearoff=0)
@@ -938,21 +941,31 @@ class SpectralCubeAnalysisTool:
         self.redraw_all_polygons_button.grid(row=self.polygons_menu_row, column=self.polygons_menu_col)
         self.polygons_menu_col += 1
 
+        # ----------------------------------------------------------------
         # create a button to clear all polygons
         self.clear_polygons_button = tk.Button(ui_frame, text="Delete All Polygons", command=self.clear_all_polygons)
         self.clear_polygons_button.grid(row=self.polygons_menu_row, column=self.polygons_menu_col)
         self.polygons_menu_col += 1
 
+        # ----------------------------------------------------------------
         # create a button to extract spectra from polygons
         self.extract_spectra_button = tk.Button(ui_frame, text="Plot Mean Spectra", command=self.update_polygons_spectral_plot)
         self.extract_spectra_button.grid(row=self.polygons_menu_row, column=self.polygons_menu_col)
         self.polygons_menu_col += 1
 
+        # ----------------------------------------------------------------
         # create a button to save the ROIs
         self.save_rois_button = tk.Button(ui_frame, text="Save ROIs", command=self.save_polygons)
         self.save_rois_button.grid(row=self.polygons_menu_row, column=self.polygons_menu_col)
         self.polygons_menu_col += 1
+        
+        # ----------------------------------------------------------------
+        # create a button to load the ROIs
+        self.load_rois_button = tk.Button(ui_frame, text="Load ROIs", command=self.load_polygons)
+        self.load_rois_button.grid(row=self.polygons_menu_row, column=self.polygons_menu_col)
+        self.polygons_menu_col += 1
 
+        # ----------------------------------------------------------------
         # create a dropdown menu to select the polygon color from a list of colors
         self.polygon_color_var = tk.StringVar(ui_frame)
         self.polygon_color_var.set("red") # default value
@@ -960,14 +973,32 @@ class SpectralCubeAnalysisTool:
         self.polygon_color_dropdown.grid(row=self.polygons_menu_row, column=self.polygons_menu_col)
         self.polygons_menu_row += 1
 
-        # create a table to display the polygon information
-        # # Create headers for the table
-        header_labels = ["Polygon Number", "Color", "Number of Points"]
-        for i, header_text in enumerate(header_labels):
-            header_label = tk.Label(self.polygons_menu_window, text=header_text)
-            header_label.grid(row=1, column=i)
+        # ----------------------------------------------------------------
+        # create a table to display polygon information
+        self.create_polygons_table()
+
+    def create_polygons_table(self):
+        header_labels = ("Polygon Number", "Color", "Number of Points")
+        self.polygon_editing_data = {} 
+        self.editing_polygon_table = False
+        # Create a Text widget for displaying the header labels
+        self.polygon_table = ttk.Treeview(self.polygons_menu_window, columns=header_labels, show="headings")
+
+        # Configure column headings
+        for col in header_labels:
+            self.polygon_table.heading(col, text=col)
+            self.polygon_table.column(col, width=len(col)*9, anchor=tk.CENTER)  # Set the column width as needed
         
-        # get the information from the polygons to display in the table
+        self.polygon_table.grid(row=1, column=0, columnspan=len(header_labels))
+        self.polygon_table.bind("<Double-1>", self.edit_cell)
+
+        # Bind right-click to show the context menu
+        self.polygon_table.bind("<Button-2>", self.show_context_menu)
+
+        # Create a context menu
+        self.context_menu = tk.Menu(self.polygon_table, tearoff=0)
+        self.context_menu.add_command(label="Edit", command=self.edit_cell)
+        self.context_menu.add_command(label="Delete", command=self.delete_polygon)
         self.update_polygons_table()
 
     def update_polygons_table(self):
@@ -976,14 +1007,14 @@ class SpectralCubeAnalysisTool:
         for i, polygon in enumerate(self.all_polygons):
             polygon_number = i
             polygon_color = self.polygon_colors[i]
-            number_of_points = len(polygon)-1
-            self.polygons_table_data.append([polygon_number, polygon_color, number_of_points])
-        
-        # Populate the table with data
-        for i, row_data in enumerate(self.polygons_table_data):
-            for j, cell_value in enumerate(row_data):
-                cell_label = tk.Label(self.polygons_menu_window, text=cell_value)
-                cell_label.grid(row=i + 2, column=j)
+            number_of_points = len(polygon) - 1
+            self.polygons_table_data.append((polygon_number, polygon_color, number_of_points))
+
+        for item in self.polygon_table.get_children():
+            self.polygon_table.delete(item)
+
+        for row in self.polygons_table_data:
+            self.polygon_table.insert("", "end", values=row)
 
     def clear_polygons_table(self):
         self.polygons_table_data = []
@@ -998,6 +1029,52 @@ class SpectralCubeAnalysisTool:
             for j, cell_value in enumerate(row_data):
                 cell_label = tk.Label(self.polygons_menu_window, text=cell_value)
                 cell_label.grid(row=i + 2, column=j)
+   
+    def show_context_menu(self, event):
+        self.tmp_event = event
+        item = self.polygon_table.identify_row(event.y)
+        if item:
+            self.polygon_table.selection_set(item)
+            self.context_menu.post(event.x_root, event.y_root)
+
+    # table editing functions
+    # def execute_command_with_event(self, command_function, event):
+    #     command_function(event)
+
+    def edit_cell(self, event=None):
+        if event is None:
+            event = self.tmp_event
+        item = self.polygon_table.identify_row(event.y)
+        column = self.polygon_table.identify_column(event.x)
+        if int(column[1:]) != 2:
+            return
+        cell_value = self.polygon_table.item(item, "values")[int(column[1:]) - 1]
+
+        if not self.editing_polygon_table:
+            self.polygon_editing_data[item, column] = cell_value  # Store the original value
+
+            # Create a Toplevel window for editing
+            edit_window = tk.Toplevel(self.polygons_menu_window)
+
+            # Create an Entry widget inside the edit_window
+            edit_entry = ttk.Entry(edit_window, justify="center")
+            edit_entry.insert(0, cell_value)
+            edit_entry.pack()
+
+            def save_and_close():
+                new_value = edit_entry.get()
+                self.polygon_table.set(item, column, new_value)
+                pc_index = int(self.polygon_table.item(item, "values")[0])
+                self.polygon_colors[pc_index] = new_value
+                self.draw_all_polygons()
+                edit_window.destroy()
+
+            # Create a button to save changes
+            save_button = ttk.Button(edit_window, text="Save", command=save_and_close)
+            save_button.pack()
+
+            # Focus on the Entry widget
+            edit_entry.focus_set()
 
     def toggle_polygons(self):
         if self.draw_polygons:
@@ -1024,6 +1101,27 @@ class SpectralCubeAnalysisTool:
         self.update_left_display()
         self.update_right_display()
     
+    def delete_polygon(self):
+        event = self.tmp_event
+        # Ask the user if they are sure
+        answer = messagebox.askyesno("Confirmation", "Are you sure you want to delete this polygon?")
+        if answer:
+            item = self.polygon_table.identify_row(event.y)
+            pc_index = int(self.polygon_table.item(item, "values")[0])
+            self.polygon_table.delete(item)
+            self.all_polygons.pop(pc_index)
+            self.polygon_colors.pop(pc_index)
+            if self.polygon_spectra:
+                self.polygon_spectra.pop(pc_index)
+            if self.polygons_spectral_window is not None:
+                if self.polygons_spectral_window.winfo_exists():
+                    self.update_polygons_spectral_plot()
+            self.remove_polygons_from_display()
+            self.draw_all_polygons()
+            
+        else:
+            pass
+
     def clear_all_polygons(self):
         # Ask the user if they are sure
         answer = messagebox.askyesno("Confirmation", "Are you sure you want to delete all polygons?")
@@ -1040,15 +1138,12 @@ class SpectralCubeAnalysisTool:
     def extract_spectra_from_polygons(self):
         if hasattr(self, "left_data"):
             if self.all_polygons:
-                # get the indices of the pixels within the polygons
-                # left_row_indices = []
-                # left_col_indices = []
+
                 self.polygon_spectra = []
                 for polygon in self.all_polygons:
                     mask = np.zeros((self.left_data.nrows, self.left_data.ncols), dtype=np.uint8)
                     polygon_points_int = [(int(x), int(y)) for x, y in polygon]
                     cv2.fillPoly(mask, [np.array(polygon_points_int)], 1) 
-                    # roi = self.left_data * mask
                     gstats = spectral.calc_stats(self.left_data, mask=mask, allow_nan=True)
                     mean_spectrum = gstats.mean
                     # set values <=0 or >=1 to np.nan
@@ -1056,24 +1151,6 @@ class SpectralCubeAnalysisTool:
                     mean_spectrum = np.where(mean_spectrum > 1, np.nan, mean_spectrum)
 
                     self.polygon_spectra.append(mean_spectrum)
-
-                    # polygon = np.array(polygon)
-                    # polygon = np.round(polygon).astype(int)
-                    # polygon = np.flip(polygon, axis=1)
-                    # polygon = np.flip(polygon, axis=0)
-                    # polygon = np.transpose(polygon)
-                    # row_indices, col_indices = polygon
-                    # left_row_indices = np.array(row_indices)
-                    # left_col_indices = np.array(col_indices)
-
-                    # # get the spectra from the left data
-                    # print(left_row_indices, left_col_indices)
-                    # spectrum = self.left_data[left_row_indices, left_col_indices, :]
-                    # spectrum = np.where(spectrum < 0, np.nan, spectrum)
-                    # spectrum = np.where(spectrum > 1, np.nan, spectrum)
-                    # spectrum = np.transpose(spectrum, (1, 0, 2))
-                    # spectrum = np.nanmean(spectrum, axis=1)
-                    # spectrum = np.nan_to_num(spectrum)
 
                 # plot the spectra
                 self.update_polygons_spectral_plot()
@@ -1099,6 +1176,25 @@ class SpectralCubeAnalysisTool:
                 polygons_gdf.to_file(filename)
         else:
             messagebox.showwarning("Warning", "No polygons drawn. Draw polygons first.")        
+
+    def load_polygons(self):
+        # Ask the user to choose the saved session file
+        file_path = filedialog.askopenfilename(
+            filetypes=[("Shape Files", "*.shp")],  # Filter for pickle files
+        )
+
+        if file_path:
+            gpf = gpd.read_file(file_path)
+            for i, geom in enumerate(gpf.geometry):
+                # (lon, lat) <--> (x,y)
+                polygon_coords = geom.exterior.coords.xy
+                polygon_pixel_coords = []
+                # translate from geographic to pixel coordinates
+                for lon, lat in zip(polygon_coords[0], polygon_coords[1]):
+                    y, x = self.left_rio.index(lon,lat)
+                    polygon_pixel_coords.append((x,y))
+                self.all_polygons.append(polygon_pixel_coords)
+                self.polygon_colors.append(gpf.color[i])
 
 # ----------------------------------------------------------------
 # canvas click functionality
@@ -1138,6 +1234,7 @@ class SpectralCubeAnalysisTool:
             elif event.inaxes == self.left_ax or event.inaxes == self.right_ax:
                 if event.button == 1: #left mouse button press
                     x, y = int(event.xdata), int(event.ydata)
+                    self.spectrum_label = f"Pixel: {x}, {y}"
                     if self.bands_inverted:
                         self.spectrum = self.left_data[y, x, :].flatten()
                         self.spectrum = self.spectrum[::-1]
@@ -1327,55 +1424,60 @@ class SpectralCubeAnalysisTool:
     # polygons
     # ----------------------------------------------------------------
     def create_polygons_spectral_plot(self):
-        self.polygons_spectral_window = tk.Toplevel(self.root)
-        self.polygons_spectral_window.title("ROI Spectral Plot")
         
-        # Create a frame to hold UI elements with a fixed size
-        ui_frame = tk.Frame(self.polygons_spectral_window)
-        ui_frame.pack(fill=tk.X)
+        if not self.polygon_spectra:
+            self.extract_spectra_from_polygons()
+        else:
+            self.polygons_spectral_window = tk.Toplevel(self.root)
+            self.polygons_spectral_window.title("ROI Spectral Plot")
+            
+            # Create a frame to hold UI elements with a fixed size
+            ui_frame = tk.Frame(self.polygons_spectral_window)
+            ui_frame.pack(fill=tk.X)
 
-        polygons_spectral_figure, self.polygons_spectral_ax = plt.subplots(figsize=(5,3))
-        for poly_color, s in zip(self.polygon_colors, self.polygon_spectra):
-            s = s.flatten()
-            self.polygon_spectral_lines.append(self.polygons_spectral_ax.plot(self.left_wvl, s, color=poly_color))
-        # self.polygon_spectral_lines, = self.polygons_spectral_ax.plot(self.left_wvl, self.polygon_spectra)
-        xmin, xmax = self.polygons_spectral_ax.get_xlim()
-        xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
-        xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
-        all_min_y = []
-        all_max_y = []
-        for s in self.polygon_spectra:
-            min_y, max_y = np.nanmin(s[xmin_idx:xmax_idx]), np.nanmax(s[xmin_idx:xmax_idx])
-            all_min_y.append(min_y)
-            all_max_y.append(max_y)
-        min_y, max_y = np.nanmin(all_min_y), np.nanmax(all_max_y)
-        buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
-        self.polygons_spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
+            polygons_spectral_figure, self.polygons_spectral_ax = plt.subplots(figsize=(5,3))
 
-        self.polygons_spectral_canvas = FigureCanvasTkAgg(polygons_spectral_figure, master=self.polygons_spectral_window)
-        self.polygons_spectral_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            for poly_color, s in zip(self.polygon_colors, self.polygon_spectra):
+                s = s.flatten()
+                self.polygon_spectral_lines.append(self.polygons_spectral_ax.plot(self.left_wvl, s, color=poly_color))
+            # self.polygon_spectral_lines, = self.polygons_spectral_ax.plot(self.left_wvl, self.polygon_spectra)
+            xmin, xmax = self.polygons_spectral_ax.get_xlim()
+            xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
+            xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
+            all_min_y = []
+            all_max_y = []
+            for s in self.polygon_spectra:
+                min_y, max_y = np.nanmin(s[xmin_idx:xmax_idx]), np.nanmax(s[xmin_idx:xmax_idx])
+                all_min_y.append(min_y)
+                all_max_y.append(max_y)
+            min_y, max_y = np.nanmin(all_min_y), np.nanmax(all_max_y)
+            buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
+            self.polygons_spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
 
-        # Add a button to reset x-axis span
-        self.reset_polygons_x_axis_button = tk.Button(ui_frame, text="Reset X-Axis Span", command=self.reset_polygons_x_axis_span)
-        self.reset_polygons_x_axis_button.pack(side=tk.RIGHT)
+            self.polygons_spectral_canvas = FigureCanvasTkAgg(polygons_spectral_figure, master=self.polygons_spectral_window)
+            self.polygons_spectral_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-        # Add built-in span options to a dropdown menu
-        span_options = ["Full Span", "410 - 1000 nm", "1000 - 2600 nm", "1200 - 2000 nm", "1800 - 2500 nm", "2000 - 2500 nm", "2700 - 3900 nm"]
-        self.polygons_span_var = tk.StringVar()
-        self.polygons_span_var.set("Full Span")  # Set the default span option
-        span_menu = ttk.Combobox(ui_frame, textvariable=self.polygons_span_var, values=span_options, state="readonly")
-        span_menu.pack(side=tk.RIGHT)
+            # Add a button to reset x-axis span
+            self.reset_polygons_x_axis_button = tk.Button(ui_frame, text="Reset X-Axis Span", command=self.reset_polygons_x_axis_span)
+            self.reset_polygons_x_axis_button.pack(side=tk.RIGHT)
 
-        # Bind an event to update the x-axis span when a span option is selected
-        span_menu.bind("<<ComboboxSelected>>", self.update_polygons_x_axis_span)
+            # Add built-in span options to a dropdown menu
+            span_options = ["Full Span", "410 - 1000 nm", "1000 - 2600 nm", "1200 - 2000 nm", "1800 - 2500 nm", "2000 - 2500 nm", "2700 - 3900 nm"]
+            self.polygons_span_var = tk.StringVar()
+            self.polygons_span_var.set("Full Span")  # Set the default span option
+            span_menu = ttk.Combobox(ui_frame, textvariable=self.polygons_span_var, values=span_options, state="readonly")
+            span_menu.pack(side=tk.RIGHT)
 
-        # Create a toolbar for the spectral plot
-        toolbar = NavigationToolbar2Tk(self.polygons_spectral_canvas, self.polygons_spectral_window)
-        toolbar.update()
-        self.polygons_spectral_canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-        
-        # Add span selector for x-axis
-        self.create_polygons_x_axis_span_selector(self.left_wvl)
+            # Bind an event to update the x-axis span when a span option is selected
+            span_menu.bind("<<ComboboxSelected>>", self.update_polygons_x_axis_span)
+
+            # Create a toolbar for the spectral plot
+            toolbar = NavigationToolbar2Tk(self.polygons_spectral_canvas, self.polygons_spectral_window)
+            toolbar.update()
+            self.polygons_spectral_canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+            
+            # Add span selector for x-axis
+            self.create_polygons_x_axis_span_selector(self.left_wvl)
     
     def update_polygons_spectral_plot(self):
         if self.polygons_spectral_window is None or not self.polygons_spectral_window.winfo_exists():
@@ -1490,7 +1592,12 @@ class SpectralCubeAnalysisTool:
         ui_frame.pack(fill=tk.X)
 
         spectral_figure, self.spectral_ax = plt.subplots(figsize=(5,3))
-        self.spectral_line, = self.spectral_ax.plot(self.left_wvl, self.spectrum)
+        self.spectral_line, = self.spectral_ax.plot(self.left_wvl, self.spectrum, label=self.spectrum_label)
+        self.spectral_ax.legend(loc='best')  # 'loc' can be adjusted to specify the legend position
+        self.spectral_ax.set_xlabel('Wavelength')
+        self.spectral_ax.set_ylabel('Value')
+        self.spectral_ax.set_title('Spectral Plot')
+        
         xmin, xmax = self.spectral_ax.get_xlim()
         xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
         xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
@@ -1528,6 +1635,8 @@ class SpectralCubeAnalysisTool:
             self.create_spectral_plot()
         else:
             self.spectral_line.set_ydata(self.spectrum)
+            self.spectral_line.set_label(self.spectrum_label)
+            self.spectral_ax.legend()
             xmin, xmax = self.spectral_ax.get_xlim()
             xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
             xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
@@ -1733,9 +1842,6 @@ class SpectralCubeAnalysisTool:
             with open(file_path, 'wb') as file:
                 pickle.dump(state_dict, file)
 
-    def on_closing(self):
-        root.destroy()
-
     def load_state(self):
         # Ask the user to choose the saved session file
         file_path = filedialog.askopenfilename(
@@ -1755,6 +1861,10 @@ class SpectralCubeAnalysisTool:
             self.polygon_spectra = restored_instance['polygon_spectra']
             self.spectrum = restored_instance['spectrum']
             self.ratio_spectrum = restored_instance['ratio_spectrum']
+
+    def on_closing(self):
+        self.root.destroy()
+        self.root.quit
 
 if __name__ == "__main__":
     root = tk.Tk()
