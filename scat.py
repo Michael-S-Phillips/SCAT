@@ -9,6 +9,7 @@ import spectral
 import numpy as np
 import rasterio as rio
 import cv2
+import sys
 
 import geopandas as gpd
 from shapely.geometry import Polygon as sgp
@@ -18,25 +19,33 @@ class SpectralCubeAnalysisTool:
     TODO:
         - Adding more functionality to the polygon shape layer tool:
             > naming polygons
-            > better ability to edit individual polygons
-            > ability to delete individual polygons
+            > ability to edit individual polygons
+            > plot spectrum from individual polygon
+            > plot mean of multiple polygons together
             > ability to cancel a polygon in the middle of drawing
-            > a way to interact with polygons in a table format (edit names and colors)
-            > speed up mean spectra plotting
-            > add ability to import shape files
         - Spectral plotting
             > add ability to save plots at figure quality
             > spectral smoothing routines (Rogers for CRISM, generic smoothing)
             > add ability to plot multiple spectra on the same plot for point and click spectra
             > add ability to plot library spectra
             > add ability to offset for clarity
-        - Adding basic spectral analysis workflows, such as MNF and HyPyRameter
+        - Adding basic spectral analysis workflows
+            > MNF
+            > HyPyRameter
+            > Vectorization (Sam)
+            > Neural Net classifiers
         - Add default Browse product combos for parameter display
         - Add ability to save statistics from parameter file over ROIs
+        - Add a tool for measuring distance.
+        - Test with larger images.
+        - Test with tripod images (will break because georef info won't be present)
+        - Overall better error handling
 
     This class creates a GUI for analyzing hyperspectral data. It allows the user to load a hyperspectral and analyze an image 
     '''
-
+# ----------------------------------------------------------------
+# initial setup
+# ----------------------------------------------------------------
     def __init__(self, root):
         '''
         Initializes the GUI and creates the main UI elements.
@@ -98,6 +107,10 @@ class SpectralCubeAnalysisTool:
         self.draw_polygons_button = tk.Button(self.right_buttons_frame, text="Draw Polygons", command=self.create_polygons_menu_window)
         self.draw_polygons_button.grid(row=1, column=0, sticky = 'new')
 
+        # Add a button to calculate spectral parameters
+        self.parameter_calculation_button = tk.Button(self.right_buttons_frame, text="Calculate Spectral Parameters", command=self.calculate_spectral_parameters)
+        self.parameter_calculation_button.grid(row=2, column=0, sticky = 'new')
+
         # Create a sub-frame for the left canvas buttons
         self.button_frame = tk.Frame(self.main_ui_frame)
         self.button_frame.grid(row=2, column=0, sticky=tk.N + tk.S + tk.W + tk.E)  # Use grid and place it in column 1
@@ -126,7 +139,7 @@ class SpectralCubeAnalysisTool:
         self.left_blue_band_menu = ttk.Combobox(self.button_frame, textvariable=self.left_blue_band_var, state="readonly")
         self.left_blue_band_menu.grid(row=2, column=1, sticky=tk.W)
 
-        self.apply_button = tk.Button(self.button_frame, text="Apply", command=self.update_left_display)
+        self.apply_button = tk.Button(self.button_frame, text="Apply", command=self.apply_new_left_bands)
         self.apply_button.grid(row=3, column=0, columnspan=2, sticky=tk.W)
 
         # Create RGB stretch value options for left canvas
@@ -196,7 +209,7 @@ class SpectralCubeAnalysisTool:
         self.right_blue_band_menu = ttk.Combobox(self.button_frame, textvariable=self.right_blue_band_var, state="readonly")
         self.right_blue_band_menu.grid(row=2, column=1, sticky=tk.W)
 
-        self.apply_button = tk.Button(self.button_frame, text="Apply", command=self.update_right_display)
+        self.apply_button = tk.Button(self.button_frame, text="Apply", command=self.apply_new_right_bands)
         self.apply_button.grid(row=3, column=0, columnspan=2, sticky=tk.W)
 
         # Create RGB stretch value options for the right canvas
@@ -272,10 +285,10 @@ class SpectralCubeAnalysisTool:
         self.left_canvas = FigureCanvasTkAgg(self.left_figure, master=self.left_frame)
         self.left_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")  # Use grid instead of pack
 
-        toolbar_frame = tk.Frame(self.left_frame)
-        toolbar = NavigationToolbar2Tk(self.left_canvas, toolbar_frame)
-        toolbar.update()
-        toolbar_frame.grid(row=1, column=0, sticky="nsew")
+        self.left_nav_toolbar_frame = tk.Frame(self.left_frame)
+        self.left_nav_toolbar = NavigationToolbar2Tk(self.left_canvas, self.left_nav_toolbar_frame)
+        self.left_nav_toolbar.update()
+        self.left_nav_toolbar_frame.grid(row=1, column=0, sticky="nsew")
 
         # Configure columns to expand with resizing
         self.left_frame.grid_rowconfigure(0, weight=1)  # Adjust the column number if needed
@@ -310,7 +323,8 @@ class SpectralCubeAnalysisTool:
         # Bind the click event to the canvas
         self.left_canvas.mpl_connect('button_press_event', self.on_left_canvas_click)
         self.left_canvas.mpl_connect('scroll_event', self.on_scroll)
-        # self.left_canvas.mpl_connect('button_release_event', self.on_canvas_release)
+        self.left_canvas.mpl_connect('button_release_event', self.on_left_release)
+        # self.left_canvas.mpl_connect('draw_event', self.on_scroll)
         self.left_canvas.mpl_connect('motion_notify_event', self.on_canvas_motion)
 
     def create_right_canvas(self):
@@ -328,10 +342,10 @@ class SpectralCubeAnalysisTool:
         self.right_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")  # Use grid instead of pack
         # self.right_canvas.get_tk_widget().grid(row=1, column=0)
 
-        toolbar_frame = tk.Frame(self.right_frame)
-        toolbar = NavigationToolbar2Tk(self.right_canvas, toolbar_frame)
-        toolbar.update()
-        toolbar_frame.grid(row=1, column=0, sticky="nsew")
+        self.right_nav_toolbar_frame = tk.Frame(self.right_frame)
+        self.right_nav_toolbar = NavigationToolbar2Tk(self.right_canvas, self.right_nav_toolbar_frame)
+        self.right_nav_toolbar.update()
+        self.right_nav_toolbar_frame.grid(row=1, column=0, sticky="nsew")
 
 
         # Configure columns to expand with resizing
@@ -367,6 +381,7 @@ class SpectralCubeAnalysisTool:
         # Bind the click event to the canvas
         self.right_canvas.mpl_connect('button_press_event', self.on_left_canvas_click)
         self.right_canvas.mpl_connect('scroll_event', self.on_scroll)
+        self.right_canvas.mpl_connect('button_release_event', self.on_right_release)
         # self.right_canvas.mpl_connect('button_release_event', self.on_canvas_release)
         self.right_canvas.mpl_connect('motion_notify_event', self.on_canvas_motion)
 
@@ -380,19 +395,10 @@ class SpectralCubeAnalysisTool:
             self.left_data = spectral.io.envi.open(file_path)
             rio_path = file_path.replace("hdr", "img")
             self.left_rio = rio.open(rio_path)
-            self.map_info = self.left_data.metadata['map info']
-            self.crs = self.left_data.metadata['coordinate system string']
-            self.x_dpp = 5/self.left_data.ncols
-            self.y_dpp = 5/self.left_data.nrows
-            if hasattr(self.left_data.metadata, 'projection info'):
-                self.proj_info = self.left_data.metadata['projection info']
-            else:
-                self.proj_info = self.map_info[1:]
             self.left_transform = self.left_rio.transform
             self.transformer = rio.transform.AffineTransformer(self.left_transform)
             self.populate_left_wavelength_menus()
             self.create_left_canvas()
-            self.create_left_scroll_bars()
             self.display_left_data(self.default_rgb_bands)
 
     def load_right_data(self, file_path = None):
@@ -402,7 +408,6 @@ class SpectralCubeAnalysisTool:
             self.right_data = spectral.io.envi.open(file_path)
             self.populate_right_wavelength_menus()
             self.create_right_canvas()
-            self.create_right_scroll_bars()
             self.display_right_data(self.default_parameter_bands)
     
     def populate_left_wavelength_menus(self):
@@ -453,6 +458,12 @@ class SpectralCubeAnalysisTool:
             self.left_red_band_menu.set(wavelengths[self.default_rgb_bands[0]])
             self.left_green_band_menu.set(wavelengths[self.default_rgb_bands[1]])
             self.left_blue_band_menu.set(wavelengths[self.default_rgb_bands[2]])
+            self.left_red_min_stretch_var.set(np.nanmedian(self.left_data[:,:,self.default_rgb_bands[0]])-np.nanquantile(self.left_data[:,:,self.default_rgb_bands[0]], 0.6))
+            self.left_red_max_stretch_var.set(np.nanmedian(self.left_data[:,:,self.default_rgb_bands[0]])+np.nanquantile(self.left_data[:,:,self.default_rgb_bands[0]], 0.6))
+            self.left_green_min_stretch_var.set(np.nanmedian(self.left_data[:,:,self.default_rgb_bands[1]])-np.nanquantile(self.left_data[:,:,self.default_rgb_bands[1]], 0.6))
+            self.left_green_max_stretch_var.set(np.nanmedian(self.left_data[:,:,self.default_rgb_bands[1]])+np.nanquantile(self.left_data[:,:,self.default_rgb_bands[1]], 0.6))
+            self.left_blue_min_stretch_var.set(np.nanmedian(self.left_data[:,:,self.default_rgb_bands[2]])-np.nanquantile(self.left_data[:,:,self.default_rgb_bands[2]], 0.6))
+            self.left_blue_max_stretch_var.set(np.nanmedian(self.left_data[:,:,self.default_rgb_bands[2]])+np.nanquantile(self.left_data[:,:,self.default_rgb_bands[2]], 0.6))
 
     def populate_right_wavelength_menus(self):
         self.bands_inverted = False
@@ -502,6 +513,12 @@ class SpectralCubeAnalysisTool:
             self.right_red_band_menu.set(wavelengths[self.default_parameter_bands[0]])
             self.right_green_band_menu.set(wavelengths[self.default_parameter_bands[1]])
             self.right_blue_band_menu.set(wavelengths[self.default_parameter_bands[2]])
+            self.right_red_min_stretch_var.set(np.nanmedian(self.right_data[:,:,self.default_parameter_bands[0]])-np.nanstd(self.right_data[:,:,self.default_parameter_bands[0]]))
+            self.right_red_max_stretch_var.set(np.nanmedian(self.right_data[:,:,self.default_parameter_bands[0]])+np.nanstd(self.right_data[:,:,self.default_parameter_bands[0]]))
+            self.right_green_min_stretch_var.set(np.nanmedian(self.right_data[:,:,self.default_parameter_bands[1]])-np.nanstd(self.right_data[:,:,self.default_parameter_bands[1]]))
+            self.right_green_max_stretch_var.set(np.nanmedian(self.right_data[:,:,self.default_parameter_bands[1]])+np.nanstd(self.right_data[:,:,self.default_parameter_bands[1]]))
+            self.right_blue_min_stretch_var.set(np.nanmedian(self.right_data[:,:,self.default_parameter_bands[2]])-np.nanstd(self.right_data[:,:,self.default_parameter_bands[2]]))
+            self.right_blue_max_stretch_var.set(np.nanmedian(self.right_data[:,:,self.default_parameter_bands[2]])+np.nanstd(self.right_data[:,:,self.default_parameter_bands[2]]))
 
 # ----------------------------------------------------------------
 # displaying the data
@@ -540,7 +557,7 @@ class SpectralCubeAnalysisTool:
             messagebox.showerror("Error", "Invalid wavelength. Please enter valid wavelengths.")
 
     def display_left_data(self, band_indices):
-
+    
         left_red_stretch = (self.left_red_min_stretch_var.get(), self.left_red_max_stretch_var.get()) if hasattr(self, "left_red_min_stretch_var") else None
         left_green_stretch = (self.left_green_min_stretch_var.get(), self.left_green_max_stretch_var.get()) if hasattr(self, "left_green_min_stretch_var") else None
         left_blue_stretch = (self.left_blue_min_stretch_var.get(), self.left_blue_max_stretch_var.get()) if hasattr(self, "left_blue_min_stretch_var") else None
@@ -592,6 +609,46 @@ class SpectralCubeAnalysisTool:
         self.right_ax.set_xlim(0, self.right_display_cols)
         self.left_canvas.draw()
         self.right_canvas.draw()
+
+    def apply_new_left_bands(self):
+        red_band = float(self.left_red_band_var.get())
+        green_band = float(self.left_green_band_var.get())
+        blue_band = float(self.left_blue_band_var.get())
+        red_index = self.left_wvl.index(red_band)
+        green_index = self.left_wvl.index(green_band)
+        blue_index = self.left_wvl.index(blue_band)
+
+        self.left_red_min_stretch_var.set(np.nanmedian(self.left_data[:,:,red_index])-np.nanquantile(self.left_data[:,:,red_index], 0.6))
+        self.left_red_max_stretch_var.set(np.nanmedian(self.left_data[:,:,red_index])+np.nanquantile(self.left_data[:,:,red_index], 0.6))
+        self.left_green_min_stretch_var.set(np.nanmedian(self.left_data[:,:,green_index])-np.nanquantile(self.left_data[:,:,green_index], 0.6))
+        self.left_green_max_stretch_var.set(np.nanmedian(self.left_data[:,:,green_index])+np.nanquantile(self.left_data[:,:,green_index], 0.6))
+        self.left_blue_min_stretch_var.set(np.nanmedian(self.left_data[:,:,blue_index])-np.nanquantile(self.left_data[:,:,blue_index], 0.6))
+        self.left_blue_max_stretch_var.set(np.nanmedian(self.left_data[:,:,blue_index])+np.nanquantile(self.left_data[:,:,blue_index], 0.6))
+
+        self.update_left_display()
+
+    def apply_new_right_bands(self):
+        # check if it's a spectral cube or band parameter image
+        if self.right_is_parameter:
+            red_band = self.right_red_band_var.get()
+            green_band = self.right_green_band_var.get()
+            blue_band = self.right_blue_band_var.get()
+        else:
+            red_band = float(self.right_red_band_var.get())
+            green_band = float(self.right_green_band_var.get())
+            blue_band = float(self.right_blue_band_var.get())
+        red_index = self.right_wvl.index(red_band)
+        green_index = self.right_wvl.index(green_band)
+        blue_index = self.right_wvl.index(blue_band)
+
+        self.right_red_min_stretch_var.set(np.nanmedian(self.right_data[:,:,red_index])-np.nanquantile(self.right_data[:,:,red_index], 0.6))
+        self.right_red_max_stretch_var.set(np.nanmedian(self.right_data[:,:,red_index])+np.nanquantile(self.right_data[:,:,red_index], 0.6))
+        self.right_green_min_stretch_var.set(np.nanmedian(self.right_data[:,:,green_index])-np.nanquantile(self.right_data[:,:,green_index], 0.6))
+        self.right_green_max_stretch_var.set(np.nanmedian(self.right_data[:,:,green_index])+np.nanquantile(self.right_data[:,:,green_index], 0.6))
+        self.right_blue_min_stretch_var.set(np.nanmedian(self.right_data[:,:,blue_index])-np.nanquantile(self.right_data[:,:,blue_index], 0.6))
+        self.right_blue_max_stretch_var.set(np.nanmedian(self.right_data[:,:,blue_index])+np.nanquantile(self.right_data[:,:,blue_index], 0.6))
+
+        self.update_right_display()
 
 # ----------------------------------------------------------------
 # histograms and stretching
@@ -918,24 +975,29 @@ class SpectralCubeAnalysisTool:
         self.polygons_menu_window = tk.Toplevel(self.root)
         self.polygons_menu_window.title("Polygons Menu")
         
+        # ----------------------------------------------------------------
         # Create a frame to hold UI elements with a fixed size
         ui_frame = tk.Frame(self.polygons_menu_window)
         ui_frame.grid(row=0,column=0, columnspan=7)
 
+        # ----------------------------------------------------------------
         # create variables to track the row and column position of the buttons
         self.polygons_menu_row = 0
         self.polygons_menu_col = 0
 
+        # ----------------------------------------------------------------
         # Create a button to toggle drawing polygons
         self.draw_polygons_button = tk.Button(ui_frame, text="Drawing Polygons Off", command=self.toggle_polygons)
         self.draw_polygons_button.grid(row=self.polygons_menu_row, column=self.polygons_menu_col)
         self.polygons_menu_col += 1
 
+        # ----------------------------------------------------------------
         # create a button to remove polygons from display
         self.remove_polygons_button = tk.Button(ui_frame, text="Remove Polygons from Display", command=self.remove_polygons_from_display)
         self.remove_polygons_button.grid(row=self.polygons_menu_row, column=self.polygons_menu_col)
         self.polygons_menu_col += 1
 
+        # ----------------------------------------------------------------
         # create a button to re-plot the polygons on the display
         self.redraw_all_polygons_button = tk.Button(ui_frame, text="Re-draw Polygons on Display", command=self.draw_all_polygons)
         self.redraw_all_polygons_button.grid(row=self.polygons_menu_row, column=self.polygons_menu_col)
@@ -977,6 +1039,9 @@ class SpectralCubeAnalysisTool:
         # create a table to display polygon information
         self.create_polygons_table()
 
+    # ------------------------------------------------
+    # polygon table functions
+    # ------------------------------------------------
     def create_polygons_table(self):
         header_labels = ("Polygon Number", "Color", "Number of Points")
         self.polygon_editing_data = {} 
@@ -1037,10 +1102,6 @@ class SpectralCubeAnalysisTool:
             self.polygon_table.selection_set(item)
             self.context_menu.post(event.x_root, event.y_root)
 
-    # table editing functions
-    # def execute_command_with_event(self, command_function, event):
-    #     command_function(event)
-
     def edit_cell(self, event=None):
         if event is None:
             event = self.tmp_event
@@ -1079,6 +1140,9 @@ class SpectralCubeAnalysisTool:
             # Focus on the Entry widget
             edit_entry.focus_set()
 
+    # ------------------------------------------------
+    # polygon menu functions
+    # ------------------------------------------------
     def toggle_polygons(self):
         if self.draw_polygons:
             self.draw_polygons = False
@@ -1135,6 +1199,7 @@ class SpectralCubeAnalysisTool:
             self.polygon_spectra = []
             self.update_polygons_spectral_plot()
             self.remove_polygons_from_display()
+            self.update_polygons_table()
         else:
             pass
     
@@ -1243,7 +1308,7 @@ class SpectralCubeAnalysisTool:
                         self.spectrum = self.spectrum[::-1]
                     else:
                         self.spectrum = self.left_data[y, x, :].flatten()
-                    self.spectrum = np.where(self.spectrum < 0, np.nan, self.spectrum)
+                    self.spectrum = np.where(self.spectrum < -1, np.nan, self.spectrum)
                     self.spectrum = np.where(self.spectrum > 1, np.nan, self.spectrum)
                     self.update_spectral_plot()
                 elif event.button == 3:  # Right mouse button press
@@ -1261,165 +1326,52 @@ class SpectralCubeAnalysisTool:
     def on_canvas_motion(self, event):
         if hasattr(self, "left_data") and event.inaxes:
             lon, lat = self.left_rio.xy(event.ydata, event.xdata)
-            # lon = (event.xdata - self.left_data.ncols/2)*self.x_dpp + float(self.proj_info[3])
-            # lat = ((self.left_data.nrows/2) - event.ydata )*self.y_dpp + float(self.proj_info[2])
             coordinate_text = f"Lat: {lat:.4f}, Lon: {lon:.4f}"
             self.coordinates_label.config(text=coordinate_text)
             self.left_canvas.draw()
+        
+    def on_left_release(self, event):
+        if hasattr(self, "left_data") and self.left_ax.in_axes(event):
+            if self.left_nav_toolbar.mode == 'pan/zoom':
+                self.left_ax.set_xlim(self.left_ax.get_xlim())
+                self.left_ax.set_ylim(self.left_ax.get_ylim())
+                self.left_canvas.draw()
+                self.right_ax.set_xlim(self.left_ax.get_xlim())
+                self.right_ax.set_ylim(self.left_ax.get_ylim())
+                self.right_canvas.draw()
+            
+    def on_right_release(self, event):
+        if hasattr(self, "right_data") and self.right_ax.in_axes(event):
+            if self.right_nav_toolbar.mode == 'pan/zoom':
+                self.right_ax.set_xlim(self.right_ax.get_xlim())
+                self.right_ax.set_ylim(self.right_ax.get_ylim())
+                self.right_canvas.draw()
+                self.left_ax.set_xlim(self.right_ax.get_xlim())
+                self.left_ax.set_ylim(self.right_ax.get_ylim())
+                self.left_canvas.draw()
                 
     def on_scroll(self, event):
-        if hasattr(self, "left_data") and not hasattr(self, "right_data"):
-            if event.inaxes == self.left_ax:
-                x_data, y_data = event.xdata, event.ydata
-                x_lim, y_lim = self.left_ax.get_xlim(), self.left_ax.get_ylim()
-                
-                # Define the zoom factor (adjust as needed)
-                zoom_factor = 1.1 if event.button == 'down' else 1 / 1.1  # Zoom in or out
-
-                # Adjust the axis limits centered on the mouse cursor position
-                new_x_lim = [x_data - (x_data - x_lim[0]) * zoom_factor, x_data + (x_lim[1] - x_data) * zoom_factor]
-                new_y_lim = [y_data - (y_data - y_lim[0]) * zoom_factor, y_data + (y_lim[1] - y_data) * zoom_factor]
-                
-                self.left_ax.set_xlim(new_x_lim)
-                self.left_ax.set_ylim(new_y_lim)
-                
-                self.left_canvas.draw()
-        if hasattr(self, "right_data") and not hasattr(self, "left_data"):
-            if event.inaxes == self.right_ax:
-                x_data, y_data = event.xdata, event.ydata
-                x_lim, y_lim = self.right_ax.get_xlim(), self.right_ax.get_ylim()
-                
-                # Define the zoom factor (adjust as needed)
-                zoom_factor = 1.1 if event.button == 'down' else 1 / 1.1  # Zoom in or out
-
-                # Adjust the axis limits centered on the mouse cursor position
-                new_x_lim = [x_data - (x_data - x_lim[0]) * zoom_factor, x_data + (x_lim[1] - x_data) * zoom_factor]
-                new_y_lim = [y_data - (y_data - y_lim[0]) * zoom_factor, y_data + (y_lim[1] - y_data) * zoom_factor]
-                
-                self.right_ax.set_xlim(new_x_lim)
-                self.right_ax.set_ylim(new_y_lim)
-                
-                self.right_canvas.draw()
-        if hasattr(self, "right_data") and hasattr(self, "left_data"):
-            if event.inaxes == self.right_ax:
-                # left axis adjust
-                x_data, y_data = event.xdata, event.ydata
-                x_lim, y_lim = self.left_ax.get_xlim(), self.left_ax.get_ylim()
-                
-                # Define the zoom factor (adjust as needed)
-                zoom_factor = 1.1 if event.button == 'down' else 1 / 1.1  # Zoom in or out
-
-                # Adjust the axis limits centered on the mouse cursor position
-                new_x_lim = [x_data - (x_data - x_lim[0]) * zoom_factor, x_data + (x_lim[1] - x_data) * zoom_factor]
-                new_y_lim = [y_data - (y_data - y_lim[0]) * zoom_factor, y_data + (y_lim[1] - y_data) * zoom_factor]
-                
-                if new_y_lim[0] > self.left_data.nrows:
-                    new_y_lim = [self.left_data.nrows, self.left_data.nrows-self.left_display_rows]
-                elif new_y_lim[1] < 0:
-                    new_y_lim = [self.left_display_rows, 0]
-                        
-                if new_x_lim[1] > self.left_data.ncols:
-                    new_x_lim = [self.left_display_cols-self.left_display_cols, self.left_display_cols]
-                elif new_x_lim[0] < 0:
-                    new_x_lim = [0, self.left_display_cols]
-
-                self.left_ax.set_xlim(new_x_lim)
-                self.left_ax.set_ylim(new_y_lim)
-                self.right_ax.set_xlim(new_x_lim)
-                self.right_ax.set_ylim(new_y_lim)
-                
-                self.right_canvas.draw()
-                self.left_canvas.draw()
-            elif event.inaxes == self.left_ax:
-                # left axis adjust
-                x_data, y_data = event.xdata, event.ydata
-                x_lim, y_lim = self.left_ax.get_xlim(), self.left_ax.get_ylim()
-                
-                # Define the zoom factor (adjust as needed)
-                zoom_factor = 1.1 if event.button == 'down' else 1 / 1.1  # Zoom in or out
-
-                # Adjust the axis limits centered on the mouse cursor position
-                new_x_lim = [x_data - (x_data - x_lim[0]) * zoom_factor, x_data + (x_lim[1] - x_data) * zoom_factor]
-                new_y_lim = [y_data - (y_data - y_lim[0]) * zoom_factor, y_data + (y_lim[1] - y_data) * zoom_factor]
-                
-                if new_y_lim[0] > self.left_data.nrows:
-                    new_y_lim = [self.left_data.nrows, self.left_data.nrows-self.left_display_rows]
-                elif new_y_lim[1] < 0:
-                    new_y_lim = [self.left_display_rows, 0]
-                        
-                if new_x_lim[1] > self.left_data.ncols:
-                    new_x_lim = [self.left_display_cols-self.left_display_cols, self.left_display_cols]
-                elif new_x_lim[0] < 0:
-                    new_x_lim = [0, self.left_display_cols]
-
-                self.left_ax.set_xlim(new_x_lim)
-                self.left_ax.set_ylim(new_y_lim)
-                self.right_ax.set_xlim(new_x_lim)
-                self.right_ax.set_ylim(new_y_lim)
-                
-                self.left_canvas.draw()
-                self.right_canvas.draw()
-
-    def create_left_scroll_bars(self):
-        # Create vertical scroll bar
-        self.left_vertical_scrollbar = tk.Scrollbar(self.left_frame, orient="vertical", command=self.on_vertical_scroll)
-        self.left_vertical_scrollbar.grid(row=0, column=1, rowspan=2, sticky="ns")
-
-        # Create horizontal scroll bar
-        self.left_horizontal_scrollbar = tk.Scrollbar(self.left_frame, orient="horizontal", command=self.on_horizontal_scroll)
-        self.left_horizontal_scrollbar.grid(row=2, column=0, sticky="ew")
-
-        # Attach scroll bars to the canvas
-        self.left_canvas.get_tk_widget().config(yscrollcommand=self.left_vertical_scrollbar.set)
-        self.left_canvas.get_tk_widget().config(xscrollcommand=self.left_horizontal_scrollbar.set)
-
-    def create_right_scroll_bars(self):
-        # Create vertical scroll bar
-        self.right_vertical_scrollbar = tk.Scrollbar(self.right_frame, orient="vertical", command=self.on_vertical_scroll)
-        self.right_vertical_scrollbar.grid(row=0, column=1, rowspan=2, sticky="ns")
-
-        # Create horizontal scroll bar
-        self.right_horizontal_scrollbar = tk.Scrollbar(self.right_frame, orient="horizontal", command=self.on_horizontal_scroll)
-        self.right_horizontal_scrollbar.grid(row=2, column=0, sticky="ew")
-
-        # Attach scroll bars to the canvas
-        self.right_canvas.get_tk_widget().config(yscrollcommand=self.right_vertical_scrollbar.set)
-        self.right_canvas.get_tk_widget().config(xscrollcommand=self.right_horizontal_scrollbar.set)
-
-    def on_vertical_scroll(self, *args):
-        scroll_y = float(args[1])*self.left_display_rows
-        y_lim = self.left_ax.get_ylim()
+        # Handle scroll event for the left canvas
+        x_data, y_data = event.xdata, event.ydata
+        x_lim, y_lim = self.left_ax.get_xlim(), self.left_ax.get_ylim()
         
-        if y_lim[0] + scroll_y > self.left_data.nrows:
-            new_lim = [self.left_data.nrows, self.left_data.nrows-(y_lim[0]-y_lim[1])]
-        elif y_lim[1] + scroll_y < 0:
-            new_lim = [y_lim[0]-y_lim[1], 0]
-        else:
-            new_lim = [y_lim[0] + scroll_y, y_lim[1] + scroll_y]
+        # Define the zoom factor (adjust as needed)
+        zoom_factor = 1.1 if event.button == 'down' else 1 / 1.1  # Zoom in or out
 
-        self.left_ax.set_ylim(new_lim[0], new_lim[1])
-        self.right_ax.set_ylim(new_lim[0], new_lim[1])
+        # Adjust the axis limits centered on the mouse cursor position
+        new_x_lim = [x_data - (x_data - x_lim[0]) * zoom_factor, x_data + (x_lim[1] - x_data) * zoom_factor]
+        new_y_lim = [y_data - (y_data - y_lim[0]) * zoom_factor, y_data + (y_lim[1] - y_data) * zoom_factor]
 
+        # Update the left canvas
+        self.left_ax.set_xlim(new_x_lim)
+        self.left_ax.set_ylim(new_y_lim)
         self.left_canvas.draw()
-        self.right_canvas.draw()
 
-        # self.update_left_display()
-        # self.update_right_display()
-
-    def on_horizontal_scroll(self, *args):
-        scroll_x = float(args[1])*self.left_display_cols
-        x_lim = self.left_ax.get_xlim()
-        if x_lim[1] + scroll_x > self.left_data.ncols:
-            new_lim = [self.left_data.ncols-(x_lim[1]-x_lim[0]), self.left_data.ncols]
-        elif x_lim[0] + scroll_x < 0:
-            new_lim = [0, x_lim[1] - x_lim[0]]
-        else:
-            new_lim = [x_lim[0] + scroll_x, x_lim[1] + scroll_x]
-        self.left_ax.set_xlim(new_lim[0], new_lim[1])
-        self.right_ax.set_xlim(new_lim[0], new_lim[1])
-
-        self.left_canvas.draw()
-        self.right_canvas.draw()
+        # Update the right canvas with the same scroll event
+        if hasattr(self, "right_canvas"):
+            self.right_ax.set_xlim(new_x_lim)
+            self.right_ax.set_ylim(new_y_lim)
+            self.right_canvas.draw()
 
 # ----------------------------------------------------------------
 # Spectral plotting area
@@ -1817,6 +1769,29 @@ class SpectralCubeAnalysisTool:
 
         self.ratio_x_span_selector = SpanSelector(
             self.ratio_spectral_ax, on_x_span_select, 'horizontal', useblit=True)
+
+# ----------------------------------------------------------------
+# Spectral Parameters
+# ----------------------------------------------------------------
+    def calculate_spectral_parameters(self):
+        sys.path.append('/Users/phillipsm/Documents/Software/HyPyRameter/')
+        from hypyrameter.ImageCubeParameters.paramCalculator import paramCalculator
+
+        # Create an array of ones with the same length as self.left_wvl
+        bbl = [1] * len(self.left_wvl)
+
+        # Define the ranges where you want to set values to zero
+        ranges = [(1353.779297, 1404.949829), (1819.431396, 2008.762573)]
+
+        # Iterate through the ranges and set values to zero
+        for r in ranges:
+            start, end = r
+            bbl = [0 if start <= x <= end else val for x, val in zip(self.left_wvl, bbl)]
+
+        # Instantiate the class and select your input image and output directory
+        pc = paramCalculator(bbl=bbl)
+        # Run the calculator and save the results
+        pc.run()
 
 # ----------------------------------------------------------------
 # saving and closing functions
