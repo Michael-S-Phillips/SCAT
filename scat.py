@@ -9,10 +9,12 @@ import spectral
 import numpy as np
 import rasterio as rio
 import cv2
-import sys
-
 import geopandas as gpd
 from shapely.geometry import Polygon as sgp
+
+import sys
+sys.path.append('/Users/phillipsm/Documents/Software/HyPyRameter/')
+from hypyrameter.ImageCubeParameters.paramCalculator import paramCalculator
 
 class SpectralCubeAnalysisTool:
     '''
@@ -23,6 +25,7 @@ class SpectralCubeAnalysisTool:
             > plot spectrum from individual polygon
             > plot mean of multiple polygons together
             > ability to cancel a polygon in the middle of drawing
+            > ratio polygons, duplicate polygons for ratioing, duplicate polygons in-column
         - Spectral plotting
             > add ability to save plots at figure quality
             > spectral smoothing routines (Rogers for CRISM, generic smoothing)
@@ -40,6 +43,9 @@ class SpectralCubeAnalysisTool:
         - Test with larger images.
         - Test with tripod images (will break because georef info won't be present)
         - Overall better error handling
+        - adding interactive bad band list selection
+            > show the image, be able to scroll through bands visually and also plot spectra, 
+              then use a span selector to select ranges that are bad bands.
 
     This class creates a GUI for analyzing hyperspectral data. It allows the user to load a hyperspectral and analyze an image 
     '''
@@ -451,19 +457,53 @@ class SpectralCubeAnalysisTool:
                             self.left_wvl = self.left_data.metadata['band names']
             except:
                 messagebox.showerror("Error", "Unable to load wavelength information.")
+            import numpy as np
 
+            # set the wavelength values
             self.left_red_band_menu["values"] = wavelengths
             self.left_green_band_menu["values"] = wavelengths
             self.left_blue_band_menu["values"] = wavelengths
             self.left_red_band_menu.set(wavelengths[self.default_rgb_bands[0]])
             self.left_green_band_menu.set(wavelengths[self.default_rgb_bands[1]])
             self.left_blue_band_menu.set(wavelengths[self.default_rgb_bands[2]])
-            self.left_red_min_stretch_var.set(np.nanmedian(self.left_data[:,:,self.default_rgb_bands[0]])-np.nanquantile(self.left_data[:,:,self.default_rgb_bands[0]], 0.6))
-            self.left_red_max_stretch_var.set(np.nanmedian(self.left_data[:,:,self.default_rgb_bands[0]])+np.nanquantile(self.left_data[:,:,self.default_rgb_bands[0]], 0.6))
-            self.left_green_min_stretch_var.set(np.nanmedian(self.left_data[:,:,self.default_rgb_bands[1]])-np.nanquantile(self.left_data[:,:,self.default_rgb_bands[1]], 0.6))
-            self.left_green_max_stretch_var.set(np.nanmedian(self.left_data[:,:,self.default_rgb_bands[1]])+np.nanquantile(self.left_data[:,:,self.default_rgb_bands[1]], 0.6))
-            self.left_blue_min_stretch_var.set(np.nanmedian(self.left_data[:,:,self.default_rgb_bands[2]])-np.nanquantile(self.left_data[:,:,self.default_rgb_bands[2]], 0.6))
-            self.left_blue_max_stretch_var.set(np.nanmedian(self.left_data[:,:,self.default_rgb_bands[2]])+np.nanquantile(self.left_data[:,:,self.default_rgb_bands[2]], 0.6))
+
+            def calculate_stretch_limits(image, channel_index):
+                # Calculate outlier before defining stretch limits
+                channel_data = image[:, :, channel_index]
+                channel_data = np.where((channel_data > -1) & (channel_data < 1), channel_data, np.nan)
+                mean_value = np.nanmean(channel_data)
+                std_dev = np.nanstd(channel_data)
+                z_scores = (channel_data - mean_value) / std_dev
+                
+                # Define a threshold for considering values as outliers (e.g., z-score > 3)
+                outliers = np.abs(z_scores) > 3
+                
+                # Calculate statistics on non-outlier values
+                non_outliers = channel_data[~outliers]
+                
+                # Calculate stretch limits
+                min_stretch = np.nanmean(non_outliers) - 2*np.nanstd(non_outliers)
+                max_stretch = np.nanmean(non_outliers) + 2*np.nanstd(non_outliers)
+                
+                return min_stretch, max_stretch
+
+            # default_rgb_bands contains the indices for red, green, and blue channels
+            red_index, green_index, blue_index = self.default_rgb_bands
+
+            # Calculate stretch limits for each channel
+            red_min_stretch, red_max_stretch = calculate_stretch_limits(self.left_data, red_index)
+            green_min_stretch, green_max_stretch = calculate_stretch_limits(self.left_data, green_index)
+            blue_min_stretch, blue_max_stretch = calculate_stretch_limits(self.left_data, blue_index)
+
+            # Set the stretch limits variables for each channel
+            self.left_red_min_stretch_var.set(red_min_stretch)
+            self.left_red_max_stretch_var.set(red_max_stretch)
+
+            self.left_green_min_stretch_var.set(green_min_stretch)
+            self.left_green_max_stretch_var.set(green_max_stretch)
+
+            self.left_blue_min_stretch_var.set(blue_min_stretch)
+            self.left_blue_max_stretch_var.set(blue_max_stretch)
 
     def populate_right_wavelength_menus(self):
         self.bands_inverted = False
@@ -513,12 +553,60 @@ class SpectralCubeAnalysisTool:
             self.right_red_band_menu.set(wavelengths[self.default_parameter_bands[0]])
             self.right_green_band_menu.set(wavelengths[self.default_parameter_bands[1]])
             self.right_blue_band_menu.set(wavelengths[self.default_parameter_bands[2]])
-            self.right_red_min_stretch_var.set(np.nanmedian(self.right_data[:,:,self.default_parameter_bands[0]])-np.nanstd(self.right_data[:,:,self.default_parameter_bands[0]]))
-            self.right_red_max_stretch_var.set(np.nanmedian(self.right_data[:,:,self.default_parameter_bands[0]])+np.nanstd(self.right_data[:,:,self.default_parameter_bands[0]]))
-            self.right_green_min_stretch_var.set(np.nanmedian(self.right_data[:,:,self.default_parameter_bands[1]])-np.nanstd(self.right_data[:,:,self.default_parameter_bands[1]]))
-            self.right_green_max_stretch_var.set(np.nanmedian(self.right_data[:,:,self.default_parameter_bands[1]])+np.nanstd(self.right_data[:,:,self.default_parameter_bands[1]]))
-            self.right_blue_min_stretch_var.set(np.nanmedian(self.right_data[:,:,self.default_parameter_bands[2]])-np.nanstd(self.right_data[:,:,self.default_parameter_bands[2]]))
-            self.right_blue_max_stretch_var.set(np.nanmedian(self.right_data[:,:,self.default_parameter_bands[2]])+np.nanstd(self.right_data[:,:,self.default_parameter_bands[2]]))
+
+            # def calculate_stretch_limits(image, channel_index):
+            #     # Calculate outlier before defining stretch limits
+            #     channel_data = image[:, :, channel_index]
+            #     mean_value = np.nanmean(channel_data)
+            #     std_dev = np.nanstd(channel_data)
+            #     z_scores = (channel_data - mean_value) / std_dev
+                
+            #     # Define a threshold for considering values as outliers (e.g., z-score > 3)
+            #     outliers = np.abs(z_scores) > 2.5
+                
+            #     # Calculate statistics on non-outlier values
+            #     non_outliers = channel_data[~outliers]
+                
+            #     # Calculate stretch limits
+            #     min_stretch = np.nanmean(non_outliers) - 2*np.nanstd(non_outliers)
+            #     max_stretch = np.nanmean(non_outliers) + 2*np.nanstd(non_outliers)
+                
+            #     return min_stretch, max_stretch
+            def calculate_stretch_limits(image, channel_index):
+                # Calculate median and median absolute deviation (MAD)
+                channel_data = image[:, :, channel_index]
+                median_value = np.nanmedian(channel_data)
+                mad = np.nanmedian(np.abs(channel_data - median_value))
+
+                # Define a threshold for considering values as outliers (e.g., 3 times MAD)
+                threshold = 2 * mad
+                
+                # Clip values beyond the threshold to focus on the main Gaussian distribution
+                channel_data_clipped = np.clip(channel_data, median_value - threshold, median_value + threshold)
+
+                # Calculate stretch limits
+                min_stretch = np.nanmean(channel_data_clipped) - 2*np.nanstd(channel_data_clipped)
+                max_stretch = np.nanmean(channel_data_clipped) + 2*np.nanstd(channel_data_clipped)
+
+                return min_stretch, max_stretch
+
+            # default_rgb_bands contains the indices for red, green, and blue channels
+            red_index, green_index, blue_index = self.default_parameter_bands
+
+            # Calculate stretch limits for each channel in the "right_data"
+            right_red_min_stretch, right_red_max_stretch = calculate_stretch_limits(self.right_data, red_index)
+            right_green_min_stretch, right_green_max_stretch = calculate_stretch_limits(self.right_data, green_index)
+            right_blue_min_stretch, right_blue_max_stretch = calculate_stretch_limits(self.right_data, blue_index)
+
+            # Set the stretch limits variables for each channel in the "right_data"
+            self.right_red_min_stretch_var.set(right_red_min_stretch)
+            self.right_red_max_stretch_var.set(right_red_max_stretch)
+
+            self.right_green_min_stretch_var.set(right_green_min_stretch)
+            self.right_green_max_stretch_var.set(right_green_max_stretch)
+
+            self.right_blue_min_stretch_var.set(right_blue_min_stretch)
+            self.right_blue_max_stretch_var.set(right_blue_max_stretch)
 
 # ----------------------------------------------------------------
 # displaying the data
@@ -1153,7 +1241,7 @@ class SpectralCubeAnalysisTool:
 
     def draw_all_polygons(self):
         for polygon_color, polygon in zip(self.polygon_colors, self.all_polygons):
-            x, y = zip(*polygon)
+            # x, y = zip(*polygon)
             # self.left_ax.plot(x, y, 'ro')
             # self.right_ax.plot(x, y, 'ro')
             self.left_ax.add_patch(Polygon(polygon, closed=True, facecolor=polygon_color,  edgecolor='k'))
@@ -1774,9 +1862,6 @@ class SpectralCubeAnalysisTool:
 # Spectral Parameters
 # ----------------------------------------------------------------
     def calculate_spectral_parameters(self):
-        sys.path.append('/Users/phillipsm/Documents/Software/HyPyRameter/')
-        from hypyrameter.ImageCubeParameters.paramCalculator import paramCalculator
-
         # Create an array of ones with the same length as self.left_wvl
         bbl = [1] * len(self.left_wvl)
 
