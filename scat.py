@@ -12,9 +12,10 @@ import cv2
 import geopandas as gpd
 from shapely.geometry import Polygon as sgp
 
-import sys
-sys.path.append('/Users/phillipsm/Documents/Software/HyPyRameter/')
-from hypyrameter.ImageCubeParameters.paramCalculator import paramCalculator
+# try:
+from hypyrameter.paramCalculator import cubeParamCalculator
+# except:
+#     print("Unable to load HyPyRameter, visit https://github.com/Michael-S-Phillips/HyPyRameter for more information.")
 
 class SpectralCubeAnalysisTool:
     '''
@@ -114,8 +115,8 @@ class SpectralCubeAnalysisTool:
         self.draw_polygons_button.grid(row=1, column=0, sticky = 'new')
 
         # Add a button to calculate spectral parameters
-        self.parameter_calculation_button = tk.Button(self.right_buttons_frame, text="Calculate Spectral Parameters", command=self.calculate_spectral_parameters)
-        self.parameter_calculation_button.grid(row=2, column=0, sticky = 'new')
+        # self.parameter_calculation_button = tk.Button(self.right_buttons_frame, text="Calculate Spectral Parameters", command=self.calculate_spectral_parameters)
+        # self.parameter_calculation_button.grid(row=2, column=0, sticky = 'new')
 
         # Create a sub-frame for the left canvas buttons
         self.button_frame = tk.Frame(self.main_ui_frame)
@@ -272,10 +273,16 @@ class SpectralCubeAnalysisTool:
         file_menu.add_command(label = "Save Session", command=self.save_state)
         file_menu.add_command(label="Exit", command=self.root.quit)
         
-        hitogram_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Plot Hitograms", menu=hitogram_menu)
-        hitogram_menu.add_command(label="Plot Left Frame Histogram", command=self.plot_left_histograms)
-        hitogram_menu.add_command(label="Plot Right Frame Histogram", command=self.plot_right_histograms)
+        histogram_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Plot Hitograms", menu=histogram_menu)
+        histogram_menu.add_command(label="Plot Left Frame Histogram", command=self.plot_left_histograms)
+        histogram_menu.add_command(label="Plot Right Frame Histogram", command=self.plot_right_histograms)
+
+        processing_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Processing", menu=processing_menu)
+        processing_menu.add_command(label="Calculate Spectral Parameters", command=self.calculate_spectral_parameters)
+        processing_menu.add_command(label="Select Bad Bands", command=self.select_bad_bands)
+
 
     def create_left_canvas(self):
         self.left_figure, self.left_ax = plt.subplots(figsize=(6, 6))
@@ -1861,20 +1868,71 @@ class SpectralCubeAnalysisTool:
 # ----------------------------------------------------------------
 # Spectral Parameters
 # ----------------------------------------------------------------
+    def select_bad_bands(self):
+        # function to interactively select bad bands
+        # create a figure with the spectral plot
+        self.bad_bands_window = tk.Toplevel(self.root)
+        self.bad_bands_window.title("Bad Bands Selector")
+
+        # create the spectral plot
+        bad_bands_figure, self.bad_bands_ax = plt.subplots(figsize=(5,3))
+        self.bad_bands_line, = self.bad_bands_ax.plot(self.left_wvl, self.spectrum)
+        self.bad_bands_ax.set_xlabel('Wavelength')
+        self.bad_bands_ax.set_ylabel('Value')
+        self.bad_bands_ax.set_title('Spectral Plot')
+        xmin, xmax = self.bad_bands_ax.get_xlim()
+        xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
+        xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
+        min_y, max_y = np.nanmin(self.spectrum[xmin_idx:xmax_idx]), np.nanmax(self.spectrum[xmin_idx:xmax_idx])
+        buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
+        self.bad_bands_ax.set_ylim(min_y - buffer, max_y + buffer)
+
+        # initialize the bad_bands list as all 1's
+        self.bad_bands = [1] * len(self.left_wvl)
+
+        # add a span selector to retrieve the range of bad bands
+        def on_x_span_select(xmin, xmax):
+            xmin_idx = np.argmin(np.abs(self.left_wvl - xmin))
+            xmax_idx = np.argmin(np.abs(self.left_wvl - xmax))
+            # set the values within the selected range to zero
+            self.bad_bands[xmin_idx:xmax_idx] = [0] * (xmax_idx - xmin_idx)
+
+        self.bad_bands_x_span_selector = SpanSelector(
+            self.bad_bands_ax, on_x_span_select, 'horizontal', useblit=True)
+        
+        # add a way to show the bad bands in a table
+        self.bad_bands_table = ttk.Treeview(self.bad_bands_window, columns=('start', 'end', 'bad'))
+        self.bad_bands_table.heading('#0', text='Band')
+        self.bad_bands_table.heading('start', text='Start')
+        self.bad_bands_table.heading('end', text='End')
+        self.bad_bands_table.heading('bad', text='Bad')
+        self.bad_bands_table.pack(fill=tk.BOTH, expand=True)
+
+        # populate the table with the bad bands
+        for i, (start, end) in enumerate(self.bad_bands_ranges):
+            self.bad_bands_table.insert(parent='', index='end', iid=i, text=str(i+1),
+                                        values=(start, end, self.bad_bands[i]))
+
+        # add a way to change the bad bands
+        def on_bad_band_change(event):
+            item = self.bad_bands_table.selection()[0]
+            column = self.bad_bands_table.identify_column(event.x)
+            if column == '#3':  # bad column
+                value = self.bad_bands_table.item(item)['values'][2]
+                self.bad_bands_table.set(item, column='#3', value=1-value)
+                self.bad_bands[int(item)] = 1-value
+
+        self.bad_bands_table.bind('<Double-1>', on_bad_band_change)
+        
+
+        
     def calculate_spectral_parameters(self):
-        # Create an array of ones with the same length as self.left_wvl
-        bbl = [1] * len(self.left_wvl)
-
-        # Define the ranges where you want to set values to zero
-        ranges = [(1353.779297, 1404.949829), (1819.431396, 2008.762573)]
-
-        # Iterate through the ranges and set values to zero
-        for r in ranges:
-            start, end = r
-            bbl = [0 if start <= x <= end else val for x, val in zip(self.left_wvl, bbl)]
-
         # Instantiate the class and select your input image and output directory
-        pc = paramCalculator(bbl=bbl)
+        if hasattr(self, 'bad_bands'):
+            bbl = self.bad_bands
+        else:
+            bbl = [None]
+        pc = cubeParamCalculator(bbl=bbl)
         # Run the calculator and save the results
         pc.run()
 

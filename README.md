@@ -27,15 +27,6 @@ This tool is a work in progress! I will be updating this tool as I work on it. C
 - Users can load hyperspectral cubes and band parameter images.
 - Histogram plotting options are available for both the left and right frames.
 
-## TODO List
-
-The code includes a TODO list of features and improvements to be implemented in the future:
-
-- Adding more functionality to the polygon shape layer drawing.
-- Exporting polygons as GIS-readable shape layers.
-- Spectral smoothing routines
-- Adding basic spectral analysis workflows, such as MNF
-
 ## Getting Started
 
 # Installaing
@@ -43,14 +34,6 @@ The code includes a TODO list of features and improvements to be implemented in 
 git clone git@github.com:Michael-S-Phillips/SCAT.git
 conda env create -f environment.yml
 ```
-
-To use the `SpectralCubeAnalysisTool` class, you can follow these steps:
-
-1. Load hyperspectral data and a band parameter image using the provided menu options.
-2. Adjust the display settings, such as band selection and stretch.
-3. Use the buttons in the interface to draw polygons, clear polygons, and analyze data.
-4. Access histograms for both the left and right frames.
-
 ## Dependencies
 
 - The code relies on the `matplotlib`, `tkinter`, and `numpy` libraries for graphical and numerical operations. Other libraries are listed in the environment.yaml file.
@@ -61,3 +44,21 @@ from the command line:
 ```bash
 python scat.py
 ```
+To use the `SpectralCubeAnalysisTool` class, you can follow these steps:
+
+1. Load hyperspectral data and a band parameter image using the provided menu options.
+2. Adjust the display settings, such as band selection and stretch.
+3. Use the buttons in the interface to draw polygons, save polygons as geo shape files, and analyze data.
+
+## Incorporating HyPyRameter for Spectral Parameter Calculation
+
+SCAT provides a GUI interface for using the HyPyRameter library for spectral parameter calculation. Go to the HyPyRameter page and install the library follwoing the installation instructions provided there (https://github.com/Michael-S-Phillips/HyPyRameter). 
+
+
+## TODO List
+
+The code includes a TODO list of features and improvements to be implemented in the future:
+
+- Adding more functionality to the polygon shape layer drawing.
+- Spectral smoothing routines
+- Adding basic spectral analysis workflows, such as MNF
