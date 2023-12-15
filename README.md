@@ -52,7 +52,7 @@ To use the `SpectralCubeAnalysisTool` class, you can follow these steps:
 
 ## Incorporating HyPyRameter for Spectral Parameter Calculation
 
-SCAT provides a GUI interface for using the HyPyRameter library for spectral parameter calculation. Go to the HyPyRameter page and install the library follwoing the installation instructions provided there (https://github.com/Michael-S-Phillips/HyPyRameter). 
+SCAT provides a GUI interface for using the HyPyRameter library for spectral parameter calculation. Go to the HyPyRameter page to learn more about this tool (https://github.com/Michael-S-Phillips/HyPyRameter). 
 
 
 ## TODO List

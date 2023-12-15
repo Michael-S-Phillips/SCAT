@@ -1,3 +1,6 @@
 #crism MICA library
 /mrocr_8001/
 sandbox.ipynb
+.gitignore
+.DS_Store
+__pycache__/

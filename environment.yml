@@ -1,7 +1,7 @@
 name: scat
 channels:
+  - cond-forge
   - michael--s--phillips
-  - conda-forge
   - defaults
 dependencies:
   - python  # You can adjust the Python version if needed
