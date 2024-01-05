@@ -36,7 +36,7 @@ conda env create -f environment.yml
 ```
 ## Dependencies
 
-- The code relies on the `matplotlib`, `tkinter`, and `numpy` libraries for graphical and numerical operations. Other libraries are listed in the environment.yaml file.
+- The code relies on the `matplotlib`, `tkinter`, and `numpy` libraries for graphical and numerical operations. Other libraries are listed in the environment.yml file.
 
 ## How to Run
 
@@ -46,7 +46,7 @@ python scat.py
 ```
 To use the `SpectralCubeAnalysisTool` class, you can follow these steps:
 
-1. Load hyperspectral data and a band parameter image using the provided menu options.
+1. Load hyperspectral data and a band parameter image using the provided menu options (file>Load Hyperspectral Cube).
 2. Adjust the display settings, such as band selection and stretch.
 3. Use the buttons in the interface to draw polygons, save polygons as geo shape files, and analyze data.
 

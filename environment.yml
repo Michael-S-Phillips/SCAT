@@ -1,6 +1,6 @@
 name: scat
 channels:
-  - cond-forge
+  - conda-forge
   - michael--s--phillips
   - defaults
 dependencies:

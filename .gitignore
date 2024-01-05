@@ -1,6 +1,11 @@
 #crism MICA library
 /mrocr_8001/
-sandbox.ipynb
 .gitignore
 .DS_Store
 __pycache__/
+#development junk
+sandbox.ipynb
+create_histograms.py
+create_spectral_plot.py
+spectral_processes.py
+test_rois/
