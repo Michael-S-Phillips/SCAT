@@ -89,12 +89,14 @@ class SpectralCubeAnalysisTool:
         self.reset_left_hist = False
         self.draw_polygons = False
         self.ignore_bad_bands_flag = False
+        self.ignore_ratio_bad_bands_flag = False
         self.draw_poly_motion_flag = False
         self.lock_column = False
         self.points = []
         self.current_polygon = []
         self.denom_polygon = []
         self.polygon_table_item_id_row = []
+        self.polygon_to_highlight = False
         self.all_polygons = []
         self.polygon_colors = []
         self.polygon_spectra = []
@@ -102,8 +104,9 @@ class SpectralCubeAnalysisTool:
         self.polygon_ratio_spectra = []
         self.polygons_ratio_library_reflectance = []
         self.spectrum = []
+        self.denom_spectrum = []
         self.ratio_spectrum = []
-        self.collected_points = pd.DataFrame(columns=("name", "color", "mineral_id1", "mineral_id2", "mineral_id3", "mineral_id4", "x", "y", "lon", "lat", "spectrum", "parameter_values"))
+        self.collected_points = pd.DataFrame(columns=("name", "color", "mineral_id1", "mineral_id2", "mineral_id3", "mineral_id4", "x", "y", "lon", "lat", "spectrum", "denom", "parameter_values"))
 
         self.usgs_spectra_path = 'librarySpectra/'
         self.usgs_spectra_folders = glob.glob(self.usgs_spectra_path+'/*')
@@ -310,7 +313,7 @@ class SpectralCubeAnalysisTool:
 
     def create_left_canvas(self):
         self.left_figure, self.left_ax = plt.subplots(figsize=(6, 6))
-        self.left_ax.set_title("Hyperspectral Cube", fontsize= 8)
+        self.left_ax.set_title(f"Hyperspectral Cube: {self.img_base_name}", fontsize= 8)
         self.left_ax.tick_params(axis='both', which='major', labelsize=8)
         # Set the margins and spacing to zero
         self.left_figure.tight_layout()
@@ -470,7 +473,7 @@ class SpectralCubeAnalysisTool:
                             wavelengths = self.left_data.bands.centers
                             self.left_wvl = [float(i) for i in self.left_data.bands.centers]
 
-                elif self.left_data.bands.centers is None and self.left_data.metadata['band names'] is not None:
+                elif self.left_data.metadata['band names'] is not None:
                     if str(self.left_data.metadata['band names'][1]).isalpha():
                         # This is a band parameter image
                         self.left_is_parameter = True
@@ -478,6 +481,8 @@ class SpectralCubeAnalysisTool:
                         self.left_wvl = self.left_data.metadata['band names']
                     else:
                         # This is a spectral cube
+                        wavelengths = np.array(self.left_data.metadata['band names']).astype(float).tolist()
+                        self.left_data.metadata['band names'] = wavelengths
                         if self.left_data.metadata['band names'][1] - self.left_data.metadata['band names'][-1] > 0:
                             self.bands_inverted = True
                         if self.bands_inverted:
@@ -488,7 +493,9 @@ class SpectralCubeAnalysisTool:
                             wavelengths = self.left_data.metadata['band names']
                             self.left_wvl = self.left_data.metadata['band names']
             except:
-                messagebox.showerror("Error", "Unable to load wavelength information.")
+                wavelengths = list(range(1, self.left_data.shape[2] + 1))
+                self.left_wvl = wavelengths
+                messagebox.showerror("Error", "Unable to load wavelength information. Setting wavelengths to default integer values")
             import numpy as np
 
             # set the wavelength values
@@ -1240,11 +1247,11 @@ class SpectralCubeAnalysisTool:
 
                     self.all_polygons.append(self.current_polygon)
                     self.polygon_colors.append(polygon_color)
-                    self.draw_all_polygons()
 
                     self.current_polygon = []
-                    self.update_polygons_table()
+                    # self.update_polygons_table()
                     self.extract_spectra_from_polygons()
+                    self.draw_all_polygons()
                 else:
                     self.current_polygon = []
                     messagebox.showwarning("Warning", "Polygons must have more than 2 points.")
@@ -1380,19 +1387,19 @@ class SpectralCubeAnalysisTool:
     # polygon table functions
     # ------------------------------------------------
     def create_polygons_table(self):
-        header_labels = ("Polygon Number", "Color", "Number of Points", "Denominator", "Template", "Mineral ID 1", "Mineral ID 2", "Mineral ID 3", "Mineral ID 4", "Spectrum Mean", "Parameters Mean")
+        self.polygon_table_header_labels = ("Polygon Number", "Color", "Number of Points", "Denominator", "Template", "Mineral ID 1", "Mineral ID 2", "Mineral ID 3", "Mineral ID 4", "wvl", "Spectrum Mean", "params", "Parameters Mean")
         self.polygon_editing_data = {} 
         self.editing_polygon_table = False
 
         # Create a Text widget for displaying the header labels
-        self.polygon_table = ttk.Treeview(self.polygons_menu_window, columns=header_labels, show="headings")
+        self.polygon_table = ttk.Treeview(self.polygons_menu_window, columns=self.polygon_table_header_labels, show="headings")
 
         # Configure column headings
-        for col in header_labels:
+        for col in self.polygon_table_header_labels:
             self.polygon_table.heading(col, text=col)
             self.polygon_table.column(col, width=len(col)*9, anchor=tk.CENTER)  # Set the column width as needed
         
-        self.polygon_table.grid(row=1, column=0, columnspan=len(header_labels))
+        self.polygon_table.grid(row=1, column=0, columnspan=len(self.polygon_table_header_labels))
         self.polygon_table.bind("<Double-1>", self.edit_cell)
 
         # Bind right-click to show the context menu
@@ -1401,10 +1408,15 @@ class SpectralCubeAnalysisTool:
         # bind single-click to check a box
         self.polygon_table.bind("<Button-1>", self.check_a_box)
 
+        # highlight selected polygon
+        self.polygon_table.bind("<ButtonRelease-1>", self.highlight_polygon)
+
         # Create a context menu
         self.context_menu = tk.Menu(self.polygon_table, tearoff=0)
         self.context_menu.add_command(label="Edit", command=self.edit_cell)
         self.context_menu.add_command(label="Delete", command=self.delete_polygon)
+        self.context_menu.add_command(label="Plot Spectrum", command=self.delete_polygon)
+        self.context_menu.add_command(label="Plot Ratio Spectrum", command=self.delete_polygon)
 
         self.update_polygons_table()
 
@@ -1428,9 +1440,9 @@ class SpectralCubeAnalysisTool:
                 minid1, minid2, minid3, minid4 = min_ids[i]
             else:
                 minid1, minid2, minid3, minid4 = '', '', '', ''
-            spec_mean = (self.left_wvl, self.polygon_spectra[i])
-            param_mean = (self.right_wvl, self.polygon_params[i])
-            row = (polygon_number, polygon_color, number_of_points, denom_check, template_check, minid1, minid2, minid3, minid4, spec_mean, param_mean)
+            spec_mean = self.polygon_spectra[i]
+            param_mean = self.polygon_params[i]
+            row = (polygon_number, polygon_color, number_of_points, denom_check, template_check, minid1, minid2, minid3, minid4, self.left_wvl, spec_mean, self.right_wvl, param_mean)
             self.polygons_table_data.append(row)
 
         for item in self.polygon_table.get_children():
@@ -1440,6 +1452,14 @@ class SpectralCubeAnalysisTool:
         for row in self.polygons_table_data:
             item_id = self.polygon_table.insert("", "end", values=row)
             self.polygon_table_item_id_row.append(item_id)
+
+    def highlight_polygon(self, event):
+        item = self.polygon_table.identify_row(event.y)
+        if item:
+            self.polygon_table.selection_set(item)
+            # get the polygon number
+            self.polygon_to_highlight = int(self.polygon_table.item(item, "values")[0])
+            self.draw_all_polygons()
 
     def check_a_box(self, event):
         if event is None:
@@ -1473,6 +1493,7 @@ class SpectralCubeAnalysisTool:
             else:
                 self.polygon_table.set(item, column, '[ ]')
                 self.template_index = []
+                self.template_index_cache = []
         
     def clear_polygons_table(self):
         self.polygons_table_data = []
@@ -1566,8 +1587,16 @@ class SpectralCubeAnalysisTool:
             # x, y = zip(*polygon)
             # self.left_ax.plot(x, y, 'ro')
             # self.right_ax.plot(x, y, 'ro')
-            self.left_ax.add_patch(Polygon(polygon, closed=True, facecolor=polygon_color,  edgecolor='k'))
-            self.right_ax.add_patch(Polygon(polygon, closed=True, facecolor=polygon_color, edgecolor='k'))
+            if self.highlight_polygon:
+                if self.all_polygons.index(polygon) == self.polygon_to_highlight:
+                    self.left_ax.add_patch(Polygon(polygon, closed=True, facecolor=polygon_color,  edgecolor='cyan'))
+                    self.right_ax.add_patch(Polygon(polygon, closed=True, facecolor=polygon_color, edgecolor='cyan'))
+                else:
+                    self.left_ax.add_patch(Polygon(polygon, closed=True, facecolor=polygon_color,  edgecolor='k'))
+                    self.right_ax.add_patch(Polygon(polygon, closed=True, facecolor=polygon_color, edgecolor='k'))
+            else:
+                self.left_ax.add_patch(Polygon(polygon, closed=True, facecolor=polygon_color,  edgecolor='k'))
+                self.right_ax.add_patch(Polygon(polygon, closed=True, facecolor=polygon_color, edgecolor='k'))
             self.left_canvas.draw()
             self.right_canvas.draw()
             self.update_polygons_table()
@@ -1584,6 +1613,8 @@ class SpectralCubeAnalysisTool:
         if answer:
             item = self.polygon_table.identify_row(event.y)
             pc_index = int(self.polygon_table.item(item, "values")[0])
+            if len(self.polygons_table_data) != 0:
+                self.polygons_table_data.pop(pc_index)
             self.polygon_table.delete(item)
             self.all_polygons.pop(pc_index)
             self.polygon_colors.pop(pc_index)
@@ -1646,6 +1677,10 @@ class SpectralCubeAnalysisTool:
             # get the filename to save the polygons to
             filename = filedialog.asksaveasfilename(initialdir = "/",title = "Select file")#,filetypes = (("shp files","*.shp")))
             if filename:
+                # Add .gpkg extension if not already present
+                if not filename.lower().endswith('.gpkg'):
+                    filename += '.gpkg'
+                    
                 # save the polygons using geopandas and shapely.geometry
                 all_geo_poly_coords = []
                 for poly_coords in self.all_polygons:
@@ -1653,9 +1688,17 @@ class SpectralCubeAnalysisTool:
                     all_geo_poly_coords.append(geo_poly_coords)
                 polygon_geometries = [sgp(poly_coords) for poly_coords in all_geo_poly_coords]
 
-                # create a GeoDataFrame
-                polygons_gdf = gpd.GeoDataFrame({'color': self.polygon_colors}, geometry=polygon_geometries, crs=self.left_rio.crs)
-                polygons_gdf.to_file(filename)
+                # create a GeoDataFrame     
+                column_dict = {}
+                # Assuming each column has a unique identifier (replace 'column_id' with the actual identifier)
+                for i, column_id in enumerate(self.polygon_table_header_labels):  # Add the actual identifiers for your columns
+                    column_values = [self.polygon_table.item(item_id, 'values')[i] for item_id in self.polygon_table.get_children()]
+                    column_dict[column_id] = column_values
+                print(column_dict)
+                polygons_gdf = gpd.GeoDataFrame(column_dict, geometry=polygon_geometries, crs=self.left_rio.crs)
+                
+                # polygons_gdf = gpd.GeoDataFrame({'color': self.polygon_colors}, geometry=polygon_geometries, crs=self.left_rio.crs)
+                polygons_gdf.to_file(filename, driver = 'GPKG')
         else:
             messagebox.showwarning("Warning", "No polygons drawn. Draw polygons first.")        
 
@@ -1677,13 +1720,14 @@ class SpectralCubeAnalysisTool:
                     polygon_pixel_coords.append((x,y))
                 self.all_polygons.append(polygon_pixel_coords)
                 self.polygon_colors.append(gpf.color[i])
+                self.extract_spectra_from_polygons()
+                self.draw_all_polygons()
 
 # ----------------------------------------------------------------
 # Collecting point spectra
 # ----------------------------------------------------------------
     # todo:
-    # 1. fix the navigation toolbars (they're double)
-    # 2. fix the y-axis scales when library spectra are plotted
+    # 1. fix the y-axis scales when library spectra are plotted
     def update_collected_points_table(self, row=None):
 
         if hasattr(self, 'collected_points_tree'):
@@ -1798,7 +1842,11 @@ class SpectralCubeAnalysisTool:
         params = (self.right_wvl, self.parameter_values)
         # get geolocation from x, y
         lon, lat = self.left_rio.xy(y, x)
-        row = (point_name,"", "", "", "", "", x, y, lon, lat, spec, params)
+        if self.denom_spectrum:
+            denom = self.denom_spectrum
+        else:
+            denom = ""
+        row = (point_name,"", "", "", "", "", x, y, lon, lat, spec, denom, params)
         row_dict = {}
         for key, value in zip(column_headers, row): 
             row_dict[key] = value
@@ -2349,6 +2397,8 @@ class SpectralCubeAnalysisTool:
             for i, (c, s) in enumerate(zip(self.polygon_colors, self.polygon_ratio_spectra)):
                 if i == self.denominator_index: continue
                 s = s.flatten()
+                if self.ignore_bad_bands_flag:
+                    s = np.where(np.array(self.bad_bands)==0, np.nan, s)
                 l = self.polygons_ratio_spectral_ax.plot(self.left_wvl, s, color=c)
                 self.polygon_ratio_spectral_lines.append(l)
             xmin, xmax = self.polygons_ratio_spectral_ax.get_xlim()
@@ -2448,80 +2498,84 @@ class SpectralCubeAnalysisTool:
     # points
     # ----------------------------------------------------------------
     def create_spectral_plot(self):
-        self.spectral_window = tk.Toplevel(self.root)
-        self.spectral_window.title("Spectral Plot")
+        sw = spectral_window
+        sw.create_spectral_plot(app)
+
+        # # Create a new window for the spectral plot
+        # self.spectral_window = tk.Toplevel(self.root)
+        # self.spectral_window.title("Spectral Plot")
         
-        # Create a frame to hold UI elements with a fixed size
-        ui_frame = tk.Frame(self.spectral_window)
-        ui_frame.pack(side=tk.RIGHT, fill=tk.BOTH)
+        # # Create a frame to hold UI elements with a fixed size
+        # ui_frame = tk.Frame(self.spectral_window)
+        # ui_frame.pack(side=tk.RIGHT, fill=tk.BOTH)
 
-        spectral_figure, self.spectral_ax = plt.subplots(figsize=(5,3))
-        self.spectral_line, = self.spectral_ax.plot(self.left_wvl, self.spectrum, label=self.spectrum_label)
-        self.spectral_ax.legend(loc='best')  # 'loc' can be adjusted to specify the legend position
-        self.spectral_ax.set_xlabel('Wavelength')
-        self.spectral_ax.set_ylabel('Value')
-        self.spectral_ax.set_title('Spectral Plot')
+        # spectral_figure, self.spectral_ax = plt.subplots(figsize=(5,3))
+        # self.spectral_line, = self.spectral_ax.plot(self.left_wvl, self.spectrum, label=self.spectrum_label)
+        # self.spectral_ax.legend(loc='best')  # 'loc' can be adjusted to specify the legend position
+        # self.spectral_ax.set_xlabel('Wavelength')
+        # self.spectral_ax.set_ylabel('Value')
+        # self.spectral_ax.set_title('Spectral Plot')
         
-        xmin, xmax = self.spectral_ax.get_xlim()
-        xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
-        xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
-        min_y, max_y = np.nanmin(self.spectrum[xmin_idx:xmax_idx]), np.nanmax(self.spectrum[xmin_idx:xmax_idx])
-        buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
-        self.spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
+        # xmin, xmax = self.spectral_ax.get_xlim()
+        # xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
+        # xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
+        # min_y, max_y = np.nanmin(self.spectrum[xmin_idx:xmax_idx]), np.nanmax(self.spectrum[xmin_idx:xmax_idx])
+        # buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
+        # self.spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
 
-        self.spectral_canvas = FigureCanvasTkAgg(spectral_figure, master=self.spectral_window)
-        self.spectral_canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        # self.spectral_canvas = FigureCanvasTkAgg(spectral_figure, master=self.spectral_window)
+        # self.spectral_canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
-        # add a button to turn the legend on or off
-        self.toggle_legend_button = tk.Button(ui_frame, text="Legend (On)", command=self.toggle_spectral_plot_legend)
-        self.toggle_legend_button.pack(side=tk.TOP)
+        # # add a button to turn the legend on or off
+        # self.toggle_legend_button = tk.Button(ui_frame, text="Legend (On)", command=self.toggle_spectral_plot_legend)
+        # self.toggle_legend_button.pack(side=tk.TOP)
 
-        # Add a button to reset x-axis span
-        self.reset_spectral_x_axis_button = tk.Button(ui_frame, text="Reset X-Axis Span", command=self.reset_x_axis_span)
-        self.reset_spectral_x_axis_button.pack(side=tk.TOP)
+        # # Add a button to reset x-axis span
+        # self.reset_spectral_x_axis_button = tk.Button(ui_frame, text="Reset X-Axis Span", command=self.reset_x_axis_span)
+        # self.reset_spectral_x_axis_button.pack(side=tk.TOP)
 
-        # Add built-in span options to a dropdown menu
-        span_options = ["Full Span", "410 - 1000 nm", "410 - 2500 nm", "1000 - 2600 nm", "1200 - 2000 nm", "1800 - 2500 nm", "2000 - 2500 nm", "2700 - 3900 nm"]
-        self.span_var = tk.StringVar()
-        self.span_var.set("Full Span")  # Set the default span option
-        span_menu = ttk.Combobox(ui_frame, textvariable=self.span_var, values=span_options, state="readonly")
-        span_menu.pack(side=tk.TOP)
+        # # Add built-in span options to a dropdown menu
+        # span_options = ["Full Span", "410 - 1000 nm", "410 - 2500 nm", "1000 - 2600 nm", "1200 - 2000 nm", "1800 - 2500 nm", "2000 - 2500 nm", "2700 - 3900 nm"]
+        # self.span_var = tk.StringVar()
+        # self.span_var.set("Full Span")  # Set the default span option
+        # span_menu = ttk.Combobox(ui_frame, textvariable=self.span_var, values=span_options, state="readonly")
+        # span_menu.pack(side=tk.TOP)
 
-        # Bind an event to update the x-axis span when a span option is selected
-        span_menu.bind("<<ComboboxSelected>>", self.update_x_axis_span)
+        # # Bind an event to update the x-axis span when a span option is selected
+        # span_menu.bind("<<ComboboxSelected>>", self.update_x_axis_span)
 
-        # add a button to ignore bad bands
-        self.ignore_bad_bands_button = tk.Button(ui_frame, text="Ignore Bad Bands (Off)", command=self.toggle_ignore_bad_bands)
-        self.ignore_bad_bands_button.pack(side=tk.TOP)
+        # # add a button to ignore bad bands
+        # self.ignore_bad_bands_button = tk.Button(ui_frame, text="Ignore Bad Bands (Off)", command=self.toggle_ignore_bad_bands)
+        # self.ignore_bad_bands_button.pack(side=tk.TOP)
 
-        # add a drop down menu to plot library spectra, contents of the drop down menu are the library spectra located in the library_spectra folder
-        self.library_spectra_var = tk.StringVar(ui_frame)
-        self.library_spectra_var.set("None") # default value
-        self.library_spectra_list = [name.split('/')[-1] for name in self.usgs_spectra_folders]
-        # sort library_spectra_list alphabetically
-        self.library_spectra_list.sort()
-        # label the librar spectra drop down menu "library spectra"
-        self.library_spectra_label = tk.Label(ui_frame, text="Library Spectra")
-        self.library_spectra_label.pack(side=tk.TOP)
-        # create the drop down menu
-        self.library_spectra_dropdown = tk.OptionMenu(ui_frame, self.library_spectra_var, *self.library_spectra_list, command=self.plot_library_spectra)
-        self.library_spectra_dropdown.pack(side=tk.TOP)
+        # # add a drop down menu to plot library spectra, contents of the drop down menu are the library spectra located in the library_spectra folder
+        # self.library_spectra_var = tk.StringVar(ui_frame)
+        # self.library_spectra_var.set("None") # default value
+        # self.library_spectra_list = [name.split('/')[-1] for name in self.usgs_spectra_folders]
+        # # sort library_spectra_list alphabetically
+        # self.library_spectra_list.sort()
+        # # label the librar spectra drop down menu "library spectra"
+        # self.library_spectra_label = tk.Label(ui_frame, text="Library Spectra")
+        # self.library_spectra_label.pack(side=tk.TOP)
+        # # create the drop down menu
+        # self.library_spectra_dropdown = tk.OptionMenu(ui_frame, self.library_spectra_var, *self.library_spectra_list, command=self.plot_library_spectra)
+        # self.library_spectra_dropdown.pack(side=tk.TOP)
 
-        # add a button to remove library spectra from the plot
-        self.remove_library_spectra_button = tk.Button(ui_frame, text="Remove Library Spectra", command=self.remove_library_spectra)
-        self.remove_library_spectra_button.pack(side=tk.TOP)
+        # # add a button to remove library spectra from the plot
+        # self.remove_library_spectra_button = tk.Button(ui_frame, text="Remove Library Spectra", command=self.remove_library_spectra)
+        # self.remove_library_spectra_button.pack(side=tk.TOP)
 
-        # add a button to collect the point and save it to a table
-        self.collect_point_button = tk.Button(ui_frame, text="Collect Point", command=self.collect_point)
-        self.collect_point_button.pack(side=tk.TOP)
+        # # add a button to collect the point and save it to a table
+        # self.collect_point_button = tk.Button(ui_frame, text="Collect Point", command=self.collect_point)
+        # self.collect_point_button.pack(side=tk.TOP)
 
-        # Create a toolbar for the spectral plot
-        toolbar = NavigationToolbar2Tk(self.spectral_canvas, self.spectral_window)
-        toolbar.update()
-        self.spectral_canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        # # Create a toolbar for the spectral plot
+        # toolbar = NavigationToolbar2Tk(self.spectral_canvas, self.spectral_window)
+        # toolbar.update()
+        # self.spectral_canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         
-        # Add span selector for x-axis
-        self.create_x_axis_span_selector(self.left_wvl)
+        # # Add span selector for x-axis
+        # self.create_x_axis_span_selector(self.left_wvl)
 
     def toggle_spectral_plot_legend(self):
         if self.spectral_ax.get_legend() is None:
@@ -2666,6 +2720,7 @@ class SpectralCubeAnalysisTool:
         
         # ratio_spectral_figure, self.ratio_spectral_ax = plt.subplots(figsize=(5,3))
         self.ratio_spectral_figure, (self.ratio_spectral_ax1, self.ratio_spectral_ax2) = plt.subplots(2, 1, figsize=(5, 6))
+        self.ratio_spectral_axes = (self.ratio_spectral_ax1, self.ratio_spectral_ax2)
 
         # numerator and denominator are plotted on the top
         self.numerator_spectral_line, = self.ratio_spectral_ax1.plot(self.left_wvl, self.spectrum, label="numerator")
@@ -2691,6 +2746,37 @@ class SpectralCubeAnalysisTool:
 
         self.ratio_spectral_canvas = FigureCanvasTkAgg(self.ratio_spectral_figure, master=self.ratio_spectral_window)
         self.ratio_spectral_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # ---
+        # add a button to turn the legend on or off
+        self.toggle_ratio_legend_button = tk.Button(ratio_ui_frame, text="Legend (On)", command=self.toggle_ratio_spectral_plot_legend)
+        self.toggle_ratio_legend_button.pack(side=tk.TOP)
+
+        # add a button to ignore bad bands
+        self.ignore_bad_bands_button = tk.Button(ratio_ui_frame, text="Ignore Bad Bands (Off)", command=self.toggle_ratio_ignore_bad_bands)
+        self.ignore_bad_bands_button.pack(side=tk.TOP)
+
+        # add a drop down menu to plot library spectra, contents of the drop down menu are the library spectra located in the library_spectra folder
+        self.ratio_library_spectra_var = tk.StringVar(ratio_ui_frame)
+        self.ratio_library_spectra_var.set("None") # default value
+        self.ratio_library_spectra_list = [name.split('/')[-1] for name in self.usgs_spectra_folders]
+        # sort library_spectra_list alphabetically
+        self.ratio_library_spectra_list.sort()
+        # label the library spectra drop down menu "library spectra"
+        self.ratio_library_spectra_label = tk.Label(ratio_ui_frame, text="Library Spectra")
+        self.ratio_library_spectra_label.pack(side=tk.TOP)
+        # create the drop down menu
+        self.ratio_library_spectra_dropdown = tk.OptionMenu(ratio_ui_frame, self.ratio_library_spectra_var, *self.ratio_library_spectra_list, command=self.plot_ratio_library_spectra)
+        self.ratio_library_spectra_dropdown.pack(side=tk.TOP)
+
+        # add a button to remove library spectra from the plot
+        self.remove_ratio_library_spectra_button = tk.Button(ratio_ui_frame, text="Remove Library Spectra", command=self.remove_ratio_library_spectra)
+        self.remove_ratio_library_spectra_button.pack(side=tk.TOP)
+
+        # add a button to collect the point and save it to a table
+        self.collect_ratio_point_button = tk.Button(ratio_ui_frame, text="Collect Point", command=self.collect_point)
+        self.collect_ratio_point_button.pack(side=tk.TOP)
+        # ----
 
         # Add a button to reset x-axis span
         self.reset_ratio_x_axis_button = tk.Button(ratio_ui_frame, text="Reset X-Axis Span", command=self.reset_ratio_x_axis_span)
@@ -2742,6 +2828,70 @@ class SpectralCubeAnalysisTool:
             self.ratio_spectral_ax2.legend(loc='best')  # 'loc' can be adjusted to specify the legend position
 
             self.ratio_spectral_canvas.draw()
+
+    def plot_ratio_library_spectra(self, event):
+        # plot the selected library spectrum
+        # self.point_plot_library_indices
+        path_to_spec_data = self.usgs_spectra_path + event + '/' + event + '.txt'
+        path_to_wvl_data = self.usgs_spectra_path + event + '/' + '*Wavelengths*' + '.txt'
+        print(path_to_spec_data)
+        library_wvl = getWavelengthFromUSGS(path_to_wvl_data)
+        library_reflectance = getReflectanceFromUSGS(path_to_spec_data)
+        for i, ax in enumerate(self.ratio_spectral_axes):
+            xmin, xmax = ax.get_xlim()
+            ymin, ymax = ax.get_ylim()
+            xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
+            xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
+            # plot the values in spectrum_df on ax 
+            ax.plot(library_wvl, library_reflectance, label=self.ratio_library_spectra_var.get())
+            # scale each line so that the min and max values equal the min and max max value of self.spectrum
+            for line in ax.lines[1:]:
+                if i == 0:
+                    s = self.spectrum
+                elif i == 1:
+                    s = self.ratio_spectrum
+                new_y_data = (line.get_ydata() - np.nanmin(line.get_ydata())) * ((np.nanmax(s[xmin_idx:xmax_idx]) - np.nanmin(s[xmin_idx:xmax_idx])) / (np.nanmax(line.get_ydata()) - np.nanmin(line.get_ydata()))) + np.nanmin(s[xmin_idx:xmax_idx])
+                line.set_ydata(new_y_data)
+            # min_y, max_y = np.nanmin(library_reflectance), np.nanmax(library_reflectance)
+            # buffer = (max_y - min_y) * 0.1 
+            # new_y_lim = (np.nanmin((ymin, min_y - buffer)), np.nanmax((ymax, max_y + buffer)))
+            ax.set_ylim((ymin, ymax))
+            ax.set_xlim(xmin, xmax)
+            ax.legend()
+            self.ratio_spectral_canvas.draw()
+
+    def remove_ratio_library_spectra(self):
+        # Remove all lines except the first one (assuming it's the main line of the plot)
+        for line in self.ratio_spectral_ax1.lines[2:]:
+            line.remove()
+        for line in self.ratio_spectral_ax2.lines[1:]:
+            line.remove()
+
+        # Update the plot
+        self.update_ratio_spectral_plot()
+
+    def toggle_ratio_spectral_plot_legend(self):
+        for ax in self.ratio_spectral_axes:
+            if ax.get_legend() is None:
+                ax.legend()
+                self.toggle_ratio_legend_button.config(text = "Legend (On)", relief="raised")
+            else:
+                ax.legend_.remove()
+                self.toggle_ratio_legend_button.config(text = "Legend (Off)", relief="sunken")
+            self.ratio_spectral_canvas.draw()
+
+    def toggle_ratio_ignore_bad_bands(self):
+        # first check if self.bad_bands is set
+        if hasattr(self, "bad_bands"):
+            if self.ignore_ratio_bad_bands_flag:
+                self.ignore_ratio_bad_bands_flag = False
+                self.ignore_ratio_bad_bands_flag.config(text = "Ignore Bad Bands (Off)", relief="sunken")
+            else:
+                self.ignore_ratio_bad_bands_flag = True
+                self.ignore_ratio_bad_bands_flag.config(text = "Ignore Bad Bands (On)", relief="raised")
+            self.update_spectral_plot()
+        else:
+            messagebox.showwarning("Warning", "No bad bands set. Set bad bands first. (Processing > Select Bad Bands)")
 
     def reset_ratio_x_axis_span(self):
         # Reset x-axis span to the default range
@@ -2910,6 +3060,10 @@ class SpectralCubeAnalysisTool:
         self.bad_bands_table.bind('<Double-1>', on_bad_band_change)
 
         # add an option to reset the bad bands list to all good bands
+        self.plot_spectrum_from_main_view = tk.Button(self.bad_bands_window, text="Plot Spectrum from Main View", command=self.get_main_view_spec)
+        self.plot_spectrum_from_main_view.pack(side=tk.BOTTOM)
+
+        # add an option to reset the bad bands list to all good bands
         self.reset_bad_bands_button = tk.Button(self.bad_bands_window, text="Reset Bad Bands", command=self.reset_bad_bands)
         self.reset_bad_bands_button.pack(side=tk.BOTTOM)
 
@@ -2929,6 +3083,21 @@ class SpectralCubeAnalysisTool:
         # update the bad band values in the table
         for i, value in enumerate(self.bad_bands):
             self.bad_bands_table.set(i, column='#2', value=value)
+
+    def get_main_view_spec(self):
+        # get the spectrum from the main view and plot it in the bad_bands_window
+        if not self.spectrum.tolist():
+            messagebox.showwarning("Warning", "No spectrum selected, click anywhere on the main view to load a spectrum.")
+        else:
+            self.bbl_spectrum = self.spectrum
+            self.bad_bands_line.set_ydata(self.spectrum)
+            xmin, xmax = self.bad_bands_ax.get_xlim()
+            xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
+            xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
+            min_y, max_y = np.nanmin(self.bbl_spectrum[xmin_idx:xmax_idx]), np.nanmax(self.bbl_spectrum[xmin_idx:xmax_idx])
+            buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
+            self.bad_bands_ax.set_ylim(min_y - buffer, max_y + buffer)
+            self.bad_bands_canvas.draw()
 
     def interpolate_bad_bands(self):
         self.left_data_og = self.left_data #store the original cube in case we need it.
@@ -3033,7 +3202,8 @@ class SpectralCubeAnalysisTool:
                 "polygon_spectra": self.polygon_spectra,
                 "spectrum": self.spectrum,
                 "ratio_spectrum": self.ratio_spectrum,
-
+                "polyong_table_data": self.polygons_table_data,
+                "bad_bands": self.bad_bands,
             }
 
             # Serialize and save the state dictionary to the chosen file
@@ -3058,36 +3228,98 @@ class SpectralCubeAnalysisTool:
             self.polygon_colors = restored_instance['polygon_colors']
             self.polygon_spectra = restored_instance['polygon_spectra']
             self.spectrum = restored_instance['spectrum']
+            self.polygons_table_data = restored_instance['polyong_table_data']
             self.ratio_spectrum = restored_instance['ratio_spectrum']
+            self.ratio_spectrum = restored_instance['ratio_spectrum']
+            self.bad_bands = restored_instance['bad_bands']
 
     def on_closing(self):
         self.root.destroy()
         self.root.quit
 
-class Tooltip:
-    def __init__(self, widget, text):
-        self.widget = widget
-        self.text = text
-        self.tooltip = None
-        self.widget.bind("<Enter>", self.show_tooltip)
-        self.widget.bind("<Leave>", self.hide_tooltip)
+# ----------------------------------------------------------------
+# Spectral window class
+# ----------------------------------------------------------------
 
-    def show_tooltip(self, event=None):
-        x, y, _, _ = self.widget.bbox("insert")
-        x += self.widget.winfo_rootx() + 25
-        y += self.widget.winfo_rooty() + 25
+class spectral_window(SpectralCubeAnalysisTool):
+    def __init__(self, master):
+        super().__init__(master)
 
-        self.tooltip = tk.Toplevel(self.widget)
-        self.tooltip.wm_overrideredirect(True)
-        self.tooltip.wm_geometry(f"+{x}+{y}")
+    def create_spectral_plot(self):
+        self.spectral_window = tk.Toplevel(self.root)
+        self.spectral_window.title("Spectral Plot")
+        
+        # Create a frame to hold UI elements with a fixed size
+        ui_frame = tk.Frame(self.spectral_window)
+        ui_frame.pack(side=tk.RIGHT, fill=tk.BOTH)
 
-        label = tk.Label(self.tooltip, text=self.text, background="#ffffe0", relief="solid", borderwidth=1, padx=5, pady=3)
-        label.pack()
+        spectral_figure, self.spectral_ax = plt.subplots(figsize=(5,3))
+        self.spectral_line, = self.spectral_ax.plot(self.left_wvl, self.spectrum, label=self.spectrum_label)
+        self.spectral_ax.legend(loc='best')  # 'loc' can be adjusted to specify the legend position
+        self.spectral_ax.set_xlabel('Wavelength')
+        self.spectral_ax.set_ylabel('Value')
+        self.spectral_ax.set_title('Spectral Plot')
+        
+        xmin, xmax = self.spectral_ax.get_xlim()
+        xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
+        xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
+        min_y, max_y = np.nanmin(self.spectrum[xmin_idx:xmax_idx]), np.nanmax(self.spectrum[xmin_idx:xmax_idx])
+        buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
+        self.spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
 
-    def hide_tooltip(self, event=None):
-        if self.tooltip:
-            self.tooltip.destroy()
-            self.tooltip = None
+        self.spectral_canvas = FigureCanvasTkAgg(spectral_figure, master=self.spectral_window)
+        self.spectral_canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+        # add a button to turn the legend on or off
+        self.toggle_legend_button = tk.Button(ui_frame, text="Legend (On)", command=self.toggle_spectral_plot_legend)
+        self.toggle_legend_button.pack(side=tk.TOP)
+
+        # Add a button to reset x-axis span
+        self.reset_spectral_x_axis_button = tk.Button(ui_frame, text="Reset X-Axis Span", command=self.reset_x_axis_span)
+        self.reset_spectral_x_axis_button.pack(side=tk.TOP)
+
+        # Add built-in span options to a dropdown menu
+        span_options = ["Full Span", "410 - 1000 nm", "410 - 2500 nm", "1000 - 2600 nm", "1200 - 2000 nm", "1800 - 2500 nm", "2000 - 2500 nm", "2700 - 3900 nm"]
+        self.span_var = tk.StringVar()
+        self.span_var.set("Full Span")  # Set the default span option
+        span_menu = ttk.Combobox(ui_frame, textvariable=self.span_var, values=span_options, state="readonly")
+        span_menu.pack(side=tk.TOP)
+
+        # Bind an event to update the x-axis span when a span option is selected
+        span_menu.bind("<<ComboboxSelected>>", self.update_x_axis_span)
+
+        # add a button to ignore bad bands
+        self.ignore_bad_bands_button = tk.Button(ui_frame, text="Ignore Bad Bands (Off)", command=self.toggle_ignore_bad_bands)
+        self.ignore_bad_bands_button.pack(side=tk.TOP)
+
+        # add a drop down menu to plot library spectra, contents of the drop down menu are the library spectra located in the library_spectra folder
+        self.library_spectra_var = tk.StringVar(ui_frame)
+        self.library_spectra_var.set("None") # default value
+        self.library_spectra_list = [name.split('/')[-1] for name in self.usgs_spectra_folders]
+        # sort library_spectra_list alphabetically
+        self.library_spectra_list.sort()
+        # label the librar spectra drop down menu "library spectra"
+        self.library_spectra_label = tk.Label(ui_frame, text="Library Spectra")
+        self.library_spectra_label.pack(side=tk.TOP)
+        # create the drop down menu
+        self.library_spectra_dropdown = tk.OptionMenu(ui_frame, self.library_spectra_var, *self.library_spectra_list, command=self.plot_library_spectra)
+        self.library_spectra_dropdown.pack(side=tk.TOP)
+
+        # add a button to remove library spectra from the plot
+        self.remove_library_spectra_button = tk.Button(ui_frame, text="Remove Library Spectra", command=self.remove_library_spectra)
+        self.remove_library_spectra_button.pack(side=tk.TOP)
+
+        # add a button to collect the point and save it to a table
+        self.collect_point_button = tk.Button(ui_frame, text="Collect Point", command=self.collect_point)
+        self.collect_point_button.pack(side=tk.TOP)
+
+        # Create a toolbar for the spectral plot
+        toolbar = NavigationToolbar2Tk(self.spectral_canvas, self.spectral_window)
+        toolbar.update()
+        self.spectral_canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        
+        # Add span selector for x-axis
+        self.create_x_axis_span_selector(self.left_wvl)
 
 if __name__ == "__main__":
     root = tk.Tk()
