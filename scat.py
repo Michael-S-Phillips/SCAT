@@ -89,6 +89,7 @@ class SpectralCubeAnalysisTool:
         self.reset_left_hist = False
         self.draw_polygons = False
         self.ignore_bad_bands_flag = False
+        self.ignore_polygons_bad_bands_flag = False
         self.ignore_ratio_bad_bands_flag = False
         self.draw_poly_motion_flag = False
         self.lock_column = False
@@ -100,6 +101,7 @@ class SpectralCubeAnalysisTool:
         self.all_polygons = []
         self.polygon_colors = []
         self.polygon_spectra = []
+        self.polygons_library_reflectance = []
         self.polygon_params = []
         self.polygon_ratio_spectra = []
         self.polygons_ratio_library_reflectance = []
@@ -652,12 +654,13 @@ class SpectralCubeAnalysisTool:
                 self.plot_left_histograms()
 
         except ValueError:
-            messagebox.showerror("Error", "Invalid wavelength. Please enter valid wavelengths.")
+            messagebox.showerror(f"Error", "Invalid wavelength. Please enter valid wavelengths.\n{ValueError}")
 
     def update_right_display(self):
         try:
             # check if it's a spectral cube or band parameter image
             if self.right_is_parameter:
+                print('parameter image')
                 red_band = self.right_red_band_var.get()
                 green_band = self.right_green_band_var.get()
                 blue_band = self.right_blue_band_var.get()
@@ -676,7 +679,7 @@ class SpectralCubeAnalysisTool:
                 self.plot_right_histograms()
 
         except ValueError:
-            messagebox.showerror("Error", "Invalid wavelength. Please enter valid wavelengths.")
+            messagebox.showerror(f"Error", "Invalid wavelength. Please enter valid wavelengths.\n{ValueError}")
 
     def display_left_data(self, band_indices):
     
@@ -1599,9 +1602,9 @@ class SpectralCubeAnalysisTool:
             else:
                 self.left_ax.add_patch(Polygon(polygon, closed=True, facecolor=polygon_color,  edgecolor='k'))
                 self.right_ax.add_patch(Polygon(polygon, closed=True, facecolor=polygon_color, edgecolor='k'))
-            self.left_canvas.draw()
-            self.right_canvas.draw()
-            self.update_polygons_table()
+        self.left_canvas.draw()
+        self.right_canvas.draw()
+        self.update_polygons_table()
 
     def remove_polygons_from_display(self):
         self.clear_axes()
@@ -1707,23 +1710,36 @@ class SpectralCubeAnalysisTool:
     def load_polygons(self):
         # Ask the user to choose the saved session file
         file_path = filedialog.askopenfilename(
-            filetypes=[("Shape Files", "*.shp")],  # Filter for pickle files
+            filetypes=[
+                ("Shape Files", "*.shp"),  # Filter for Shapefiles
+                ("GeoPackage Files", "*.gpkg"),  # Filter for GeoPackage files
+            ]
         )
 
         if file_path:
-            gpf = gpd.read_file(file_path)
+            if file_path.endswith(".shp"):
+                gpf = gpd.read_file(file_path)
+            elif file_path.endswith(".gpkg"):
+                gpf = gpd.read_file(file_path, driver="GPKG")
+            else:
+                # Handle unsupported file types
+                print("Unsupported file type. Please select a .shp or .gpkg file.")
+                return
+
             for i, geom in enumerate(gpf.geometry):
+                print(f'reading in polygon {i}')
                 # (lon, lat) <--> (x,y)
                 polygon_coords = geom.exterior.coords.xy
                 polygon_pixel_coords = []
                 # translate from geographic to pixel coordinates
                 for lon, lat in zip(polygon_coords[0], polygon_coords[1]):
-                    y, x = self.left_rio.index(lon,lat)
-                    polygon_pixel_coords.append((x,y))
+                    y, x = self.left_rio.index(lon, lat)
+                    polygon_pixel_coords.append((x, y))
                 self.all_polygons.append(polygon_pixel_coords)
-                self.polygon_colors.append(gpf.color[i])
-                self.extract_spectra_from_polygons()
-                self.draw_all_polygons()
+                self.polygon_colors.append(gpf.Color[i])
+            print(self.polygon_colors)
+            self.extract_spectra_from_polygons()
+            self.draw_all_polygons()
 
 # ----------------------------------------------------------------
 # Collecting point spectra
@@ -2103,6 +2119,31 @@ class SpectralCubeAnalysisTool:
             span_menu = ttk.Combobox(ui_frame, textvariable=self.polygons_span_var, values=span_options, state="readonly")
             span_menu.pack(side=tk.RIGHT)
 
+            # add a button to turn the legend on or off
+            self.toggle_polygons_legend_button = tk.Button(ui_frame, text="Legend (On)", command=self.toggle_polygons_spectral_plot_legend)
+            self.toggle_polygons_legend_button.pack(side=tk.TOP)
+
+            # add a button to ignore bad bands
+            self.polygons_ignore_bad_bands_button = tk.Button(ui_frame, text="Ignore Bad Bands (Off)", command=self.toggle_polygons_ignore_bad_bands)
+            self.polygons_ignore_bad_bands_button.pack(side=tk.TOP)
+
+            # add a drop down menu to plot library spectra, contents of the drop down menu are the library spectra located in the library_spectra folder
+            self.polygons_library_spectra_var = tk.StringVar(ui_frame)
+            self.polygons_library_spectra_var.set("None") # default value
+            self.polygons_library_spectra_list = [name.split('/')[-1] for name in self.usgs_spectra_folders]
+            # sort library_spectra_list alphabetically
+            self.polygons_library_spectra_list.sort()
+            # label the library spectra drop down menu "library spectra"
+            self.polygons_library_spectra_label = tk.Label(ui_frame, text="Library Spectra")
+            self.polygons_library_spectra_label.pack(side=tk.TOP)
+            # create the drop down menu
+            self.polygons_library_spectra_dropdown = tk.OptionMenu(ui_frame, self.polygons_library_spectra_var, *self.polygons_library_spectra_list, command=self.polygons_plot_library_spectra)
+            self.polygons_library_spectra_dropdown.pack(side=tk.TOP)
+
+            # add a button to remove library spectra from the plot
+            self.polygons_remove_library_spectra_button = tk.Button(ui_frame, text="Remove Library Spectra", command=self.polygons_remove_library_spectra)
+            self.polygons_remove_library_spectra_button.pack(side=tk.TOP)
+
             # Bind an event to update the x-axis span when a span option is selected
             span_menu.bind("<<ComboboxSelected>>", self.update_polygons_x_axis_span)
 
@@ -2125,6 +2166,8 @@ class SpectralCubeAnalysisTool:
 
             for c, s in zip(self.polygon_colors, self.polygon_spectra):
                 s = s.flatten()
+                if self.ignore_polygons_bad_bands_flag:
+                    s = np.where(np.array(self.bad_bands)==0, np.nan, s)
                 self.polygon_spectral_lines.append(self.polygons_spectral_ax.plot(self.left_wvl, s, color=c))
             xmin, xmax = self.polygons_spectral_ax.get_xlim()
             xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
@@ -2142,6 +2185,72 @@ class SpectralCubeAnalysisTool:
         else:
             self.polygons_spectral_ax.clear()
             self.polygons_spectral_canvas.draw()
+    
+    def toggle_polygons_spectral_plot_legend(self):
+        ax = self.polygons_spectral_canvas.figure.axes[0]
+        if ax.get_legend() is None:
+            ax.legend()
+            self.toggle_polygons_legend_button.config(text = "Legend (On)", relief="raised")
+        else:
+            ax.legend_.remove()
+            self.toggle_polygons_legend_button.config(text = "Legend (Off)", relief="sunken")
+        self.polygons_spectral_canvas.draw()
+
+    def toggle_polygons_ignore_bad_bands(self):
+        # first check if self.bad_bands is set
+        if hasattr(self, "bad_bands"):
+            if self.ignore_polygons_bad_bands_flag:
+                self.ignore_polygons_bad_bands_flag = False
+                self.polygons_ignore_bad_bands_button.config(text = "Ignore Bad Bands (Off)", relief="sunken")
+            else:
+                self.ignore_polygons_bad_bands_flag = True
+                self.polygons_ignore_bad_bands_button.config(text = "Ignore Bad Bands (On)", relief="raised")
+            self.update_polygons_spectral_plot()
+
+    def polygons_plot_library_spectra(self, event):
+        if self.polygons_library_spectra_var.get() != "None":
+            # plot the selected library spectrum
+            ax = self.polygons_spectral_canvas.figure.axes[0]
+            path_to_spec_data = self.usgs_spectra_path + self.polygons_library_spectra_var.get() + '/' + self.polygons_library_spectra_var.get() + '.txt'
+            path_to_wvl_data = self.usgs_spectra_path + self.polygons_library_spectra_var.get() + '/' + '*Wavelengths*' + '.txt'
+            library_wvl = getWavelengthFromUSGS(path_to_wvl_data)
+            library_reflectance = getReflectanceFromUSGS(path_to_spec_data)
+            xmin, xmax = ax.get_xlim()
+            ymin, ymax = ax.get_ylim()
+            xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
+            xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
+            # plot the values in spectrum_df on self.spectral_ax 
+            ax.plot(library_wvl, library_reflectance, label=self.polygons_library_spectra_var.get())
+            self.polygons_library_reflectance.append(ax.lines[-1])
+            # scale each line so that the min and max values equal the min and max max value of self.spectrum
+            ymin_ = []
+            ymax_ = []
+            for line in self.polygon_spectral_lines:
+                ymin_.append(np.nanmin(line[0].get_ydata()[xmin_idx:xmax_idx]))
+                ymax_.append(np.nanmax(line[0].get_ydata()[xmin_idx:xmax_idx]))
+            y_min = np.nanmin(ymin_)
+            y_max = np.nanmax(ymax_)
+
+            for line in self.polygons_library_reflectance:
+                new_y_data = (line.get_ydata() - np.nanmin(line.get_ydata())) * ((y_max - y_min) / (np.nanmax(line.get_ydata()) - np.nanmin(line.get_ydata()))) + y_min
+                line.set_ydata(new_y_data)
+            # min_y, max_y = np.nanmin(library_reflectance), np.nanmax(library_reflectance)
+            # buffer = (max_y - min_y) * 0.1 
+            # new_y_lim = (np.nanmin((ymin, min_y - buffer)), np.nanmax((ymax, max_y + buffer)))
+            ax.set_ylim((ymin, ymax))
+            ax.set_xlim(xmin, xmax)
+            ax.legend()
+            self.polygons_spectral_canvas.draw()
+    
+    def polygons_remove_library_spectra(self):
+        # remove the selected library spectrum
+        ax = self.polygons_spectral_canvas.figure.axes[0]
+        self.polygons_library_reflectance[-1].remove()
+        if ax.legend_ is not None:
+            ax.legend_.remove()
+        ax.legend()
+        self.polygons_library_reflectance.pop()
+        self.polygons_spectral_canvas.draw()
     
     def reset_polygons_x_axis_span(self):
         # Reset x-axis span to the default range
@@ -3162,8 +3271,8 @@ class SpectralCubeAnalysisTool:
             interpNans = True
         else:
             interpNans = False
-        if self.crop_var.get() == 1: #this will need updated
-            crop = self.crop_var
+        if self.crop_var.get() == 1: 
+            crop = self.get_crop_limits()
         else:
             crop = None
         if self.denoise_var.get() == 1:
@@ -3177,6 +3286,48 @@ class SpectralCubeAnalysisTool:
     def run_spectral_parameters(self):
         # Run the calculator and save the results
         self.pc.run()
+
+    def get_crop_limits(self):
+        # have user input top, bottom, left, right limits for the crop parameters
+        # pop up a window with 4 entry boxes properly labeled
+        crop_window = Toplevel(self.root)
+        crop_window.title("Crop Parameters")
+        # Create labels and entry boxes for crop limits
+        top_label = tk.Label(crop_window, text="Top:")
+        top_label.grid(row=0, column=0, padx=5, pady=5)
+        top_entry = Entry(crop_window)
+        top_entry.grid(row=0, column=1, padx=5, pady=5)
+
+        bottom_label = tk.Label(crop_window, text="Bottom:")
+        bottom_label.grid(row=1, column=0, padx=5, pady=5)
+        bottom_entry = Entry(crop_window)
+        bottom_entry.grid(row=1, column=1, padx=5, pady=5)
+
+        left_label = tk.Label(crop_window, text="Left:")
+        left_label.grid(row=2, column=0, padx=5, pady=5)
+        left_entry = Entry(crop_window)
+        left_entry.grid(row=2, column=1, padx=5, pady=5)
+
+        right_label = tk.Label(crop_window, text="Right:")
+        right_label.grid(row=3, column=0, padx=5, pady=5)
+        right_entry = Entry(crop_window)
+        right_entry.grid(row=3, column=1, padx=5, pady=5)
+
+        # Function to retrieve the values from the entry boxes
+        def get_crop_limits_():
+            top = int(top_entry.get())
+            bottom = int(bottom_entry.get())
+            left = int(left_entry.get())
+            right = int(right_entry.get())
+            crop_window.destroy()
+            return [top, bottom, left, right]
+
+        # Create a button to submit the crop limits
+        submit_button = Button(crop_window, text="Submit", command=get_crop_limits_)
+        submit_button.grid(row=4, column=0, columnspan=2, padx=5, pady=5)
+
+        # return the values in a list
+        return get_crop_limits_()
 
     def edit_valid_params(self):
         # Open a new window for editing valid_params
@@ -3247,6 +3398,7 @@ class SpectralCubeAnalysisTool:
                 "all_polygons": self.all_polygons,
                 "polygon_colors": self.polygon_colors,
                 "polygon_spectra": self.polygon_spectra,
+                "polygon_params": self.polygon_params,
                 "spectrum": self.spectrum,
                 "ratio_spectrum": self.ratio_spectrum,
                 "polyong_table_data": self.polygons_table_data,
@@ -3274,11 +3426,14 @@ class SpectralCubeAnalysisTool:
             self.all_polygons = restored_instance['all_polygons']
             self.polygon_colors = restored_instance['polygon_colors']
             self.polygon_spectra = restored_instance['polygon_spectra']
+            self.polygon_params = restored_instance['polygon_params']
             self.spectrum = restored_instance['spectrum']
             self.polygons_table_data = restored_instance['polyong_table_data']
             self.ratio_spectrum = restored_instance['ratio_spectrum']
             self.ratio_spectrum = restored_instance['ratio_spectrum']
             self.bad_bands = restored_instance['bad_bands']
+            if self.all_polygons:
+                self.update_polygons_table()
 
     def on_closing(self):
         self.root.destroy()
