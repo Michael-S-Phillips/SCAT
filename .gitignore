@@ -9,3 +9,8 @@ create_histograms.py
 create_spectral_plot.py
 spectral_processes.py
 test_rois/
+SuPy.log
+channeldata.json
+index.html
+meta.yaml
+noarch/

@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, ttk, Button, Entry, Toplevel, Listbox, END
 import pickle
 from matplotlib.figure import Figure
 from matplotlib.widgets import SpanSelector
@@ -110,6 +110,8 @@ class SpectralCubeAnalysisTool:
 
         self.usgs_spectra_path = 'librarySpectra/'
         self.usgs_spectra_folders = glob.glob(self.usgs_spectra_path+'/*')
+
+        self.pc = None
 
     def create_main_ui(self):
         '''
@@ -3146,8 +3148,10 @@ class SpectralCubeAnalysisTool:
 
         # run button
         tk.Button(self.spectral_parameters_window, text="Run", command=self.run_spectral_parameters).pack()
+        # run button
+        tk.Button(self.spectral_parameters_window, text="Initiate", command=self.initiate_spectral_parameters).pack()
 
-    def run_spectral_parameters(self):
+    def initiate_spectral_parameters(self):
         # Instantiate the class and select your input image and output directory
         print(self.bbl_var)
         if self.bbl_var.get() == 1:
@@ -3166,10 +3170,53 @@ class SpectralCubeAnalysisTool:
             denoise = True
         else: 
             denoise = False
+        self.pc = None
+        self.pc = cubeParamCalculator(bbl=bbl, interpNans=interpNans, crop=crop, denoise=denoise)
+        self.edit_valid_params()
 
-        pc = cubeParamCalculator(bbl=bbl, interpNans=interpNans, crop=crop, denoise=denoise)
+    def run_spectral_parameters(self):
         # Run the calculator and save the results
-        pc.run()
+        self.pc.run()
+
+    def edit_valid_params(self):
+        # Open a new window for editing valid_params
+        edit_window = Toplevel()
+        edit_window.title("Edit Valid Parameters")
+
+        # Display current valid_params list
+        valid_params_listbox = Listbox(edit_window)
+        for param in self.pc.validParams:
+            valid_params_listbox.insert(END, param)
+        valid_params_listbox.pack()
+
+        # Function to add a parameter to valid_params
+        def add_parameter():
+            param = input_entry.get()
+            self.pc.validParams.append(param)
+            valid_params_listbox.insert(END, param)
+
+        # Entry widget to input new parameter
+        input_entry = Entry(edit_window)
+        input_entry.pack()
+
+        # Button to add parameter
+        add_button = Button(edit_window, text="Add Parameter", command=add_parameter)
+        add_button.pack()
+
+        # Function to remove selected parameter from valid_params
+        def remove_parameter():
+            index = valid_params_listbox.curselection()[0]
+            param = valid_params_listbox.get(index)
+            self.pc.validParams.remove(param)
+            valid_params_listbox.delete(index)
+
+        # Button to remove selected parameter
+        remove_button = Button(edit_window, text="Remove Parameter", command=remove_parameter)
+        remove_button.pack()
+
+        # Button to close the edit window
+        close_button = Button(edit_window, text="Close", command=edit_window.destroy)
+        close_button.pack()
 
     def activate_bbl_function(self):
         if not hasattr(self, 'bad_bands'):

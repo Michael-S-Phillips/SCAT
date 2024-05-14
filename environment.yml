@@ -11,4 +11,6 @@ dependencies:
   - numpy
   - rasterio
   - opencv
+  - geopandas
+  - IPython
   - hypyrameter
