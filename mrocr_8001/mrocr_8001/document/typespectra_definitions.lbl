@@ -1,0 +1,19 @@
+PDS_VERSION_ID            = PDS3
+RECORD_TYPE               = UNDEFINED 
+
+^DOCUMENT                 = "TYPESPECTRA_DEFINITIONS.TXT"
+OBJECT                    = DOCUMENT
+  DOCUMENT_NAME           = "CRISM TYPE SPECTRA DATA DICTIONARY"
+  DOCUMENT_FORMAT         = "UNK"
+  RECORD_TYPE             = UNDEFINED
+  PUBLICATION_DATE        = 2015-08-20
+  DOCUMENT_TOPIC_TYPE     = "SUPPLEMENTAL DICTIONARY" 
+  INTERCHANGE_FORMAT      = ASCII
+  DESCRIPTION             = "This file contains definitions of keywords
+    specific to the MRO CRISM Type Spectra data set. This file is suitable 
+    for use with PDS label validation software, and is also human-readable. 
+    The definitions in this local data dictionary will eventually be 
+    incorporated into the PDS Planetary Science Data Dictionary."
+END_OBJECT                = DOCUMENT
+
+END

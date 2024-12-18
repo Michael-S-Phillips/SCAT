@@ -1,5 +1,5 @@
 #crism MICA library
-/mrocr_8001/
+#/mrocr_8001/
 .gitignore
 .DS_Store
 __pycache__/

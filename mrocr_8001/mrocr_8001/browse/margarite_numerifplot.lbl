@@ -1,0 +1,19 @@
+PDS_VERSION_ID          = PDS3
+DATA_SET_ID             = "MRO-M-CRISM-4-TYPESPEC-V1.0"
+PRODUCT_ID              = "CRISM_TYPESPEC_MARGARITE"
+PRODUCT_TYPE            = "DOCUMENT"
+RECORD_TYPE             = STREAM
+^PNG_DOCUMENT           = "MARGARITE_NUMERIFPLOT.PNG"
+
+OBJECT                  = PNG_DOCUMENT
+  DOCUMENT_NAME         = "Unratioed numerator plot of CRISM_TYPESPEC_MARGARITE"
+  DOCUMENT_TOPIC_TYPE   = "DATA PLOT"
+  INTERCHANGE_FORMAT    = BINARY
+  DOCUMENT_FORMAT       = PNG
+  PUBLICATION_DATE      = 2015-11-06
+  FILES                 = 1
+  DESCRIPTION           = "Portable Network Graphics browse image"
+END_OBJECT              = PNG_DOCUMENT
+
+END
+
