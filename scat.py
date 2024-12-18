@@ -17,6 +17,7 @@ import pandas as pd
 import glob
 import matplotlib.colors as mcolors
 from joblib import Parallel, delayed
+import os
 
 # try:
 from hypyrameter.paramCalculator import cubeParamCalculator
@@ -71,8 +72,8 @@ class SpectralCubeAnalysisTool:
         self.root = root
         self.root.title("Spectral Cube Analysis Tool")
 
-        self.default_rgb_bands = [29, 19, 9]  # Default bands for RGB display of spectral data
-        self.default_parameter_bands = [15, 18, 19]  # Default bands for RGB display of parameter data, MAF
+        self.default_rgb_bands = [3, 2, 1]  # Default bands for RGB display of spectral data
+        self.default_parameter_bands = [3, 2, 1]  # Default bands for RGB display of parameter data, MAF
         self.default_stretch = 'linear'  # Default stretch for RGB display
         self.create_main_ui()
         self.create_menu()
@@ -110,12 +111,19 @@ class SpectralCubeAnalysisTool:
         self.spectrum = []
         self.denom_spectrum = []
         self.ratio_spectrum = []
+        self.ratio_spectrum_list = []
+        self.num_idx = None
+        self.best_denom_id_list = []
+        self.add_spectrum_flag = False
         self.bad_bands = None
         self.collected_points = pd.DataFrame(columns=("name", "color", "mineral_id1", "mineral_id2", "mineral_id3", "mineral_id4", "x", "y", "lon", "lat", "spectrum", "denom", "parameter_values"))
         self.polygons_on_flag = False
+        self.upload_polygons_flag = False
 
         self.usgs_spectra_path = 'librarySpectra/'
         self.usgs_spectra_folders = glob.glob(self.usgs_spectra_path+'/*')
+        self.mica_spectra_path = 'mrocr_8001/mrocr_8001/data/'
+        self.mica_spectra_names = glob.glob(self.mica_spectra_path+'*.tab')
 
         self.pc = None
 
@@ -438,8 +446,11 @@ class SpectralCubeAnalysisTool:
 # ----------------------------------------------------------------
     def load_left_data(self, file_path = None):
         if not file_path:
-            file_path = filedialog.askopenfilename(filetypes=[("ENVI Files", "*.hdr")])
+            file_path = filedialog.askopenfilename(filetypes=[("ENVI Files", "*.hdr"), ("JP2 Files", "*.jp2"), ("JP2 Files (Uppercase)", "*.JP2")])
+            # file_ext = file_path.split('.')[-1]
+            # print(file_ext, file_path)
         if file_path:
+            # if file_ext == 'hdr' or file_ext == 'HDR':
             self.left_data = spectral.io.envi.open(file_path)
             self.ld = self.left_data.load()
             self.img_base_name = self.left_data.filename.split('/')[-1].split('.')[0]
@@ -450,13 +461,24 @@ class SpectralCubeAnalysisTool:
             self.populate_left_wavelength_menus()
             self.create_left_canvas()
             self.display_left_data(self.default_rgb_bands)
+            # elif file_ext == "jp2" or file_ext == "JP2":
+            #     print('opening jp2 image')
+            #     self.left_data = rio.open(file_path)
+            #     self.ld = self.left_data.read().transpose(1, 2, 0)
+            #     self.left_rio = rio.open(file_path)
+            #     self.left_transform = self.left_rio.transform
+            #     self.transformer = rio.transform.AffineTransformer(self.left_transform)
+            #     self.img_base_name = file_path.split('/')[-1].split('.')[0]
+            #     self.populate_left_wavelength_menus()
+            #     self.create_left_canvas()
+            #     self.display_left_data(self.default_rgb_bands)
 
             name_ = file_path.split('/')[-1].split('.')[0]
             self.root.title(f"Spectral Cube Analysis Tool: {name_}")
 
     def load_right_data(self, file_path = None):
         if not file_path:
-            file_path = filedialog.askopenfilename(filetypes=[("ENVI Files", "*.hdr")])
+            file_path = filedialog.askopenfilename(filetypes=[("ENVI Files", "*.hdr"), ("JP2 Files", "*.jp2"), ("JP2 Files (Uppercase)", "*.JP2")])
         if file_path:
             self.right_data = spectral.io.envi.open(file_path)
             self.rd = self.right_data.load()
@@ -597,6 +619,8 @@ class SpectralCubeAnalysisTool:
                             wavelengths = self.right_data.metadata['band names']
                             self.right_wvl = self.right_data.metadata['band names']
             except:
+                wavelengths = list(range(1, self.right_data.shape[2] + 1))
+                self.right_wvl = wavelengths
                 messagebox.showerror("Error", "Unable to load wavelength information.")
 
             if len(wavelengths) < np.max(self.default_parameter_bands):
@@ -1142,13 +1166,19 @@ class SpectralCubeAnalysisTool:
                         # self.right_canvas.draw()
                     elif event.button == 3:
                         if self.template_index is not None:
-                            if self.template_index == self.template_index_cache:
+                            self.best_denom_id_list.append(np.nan)
+                            self.ratio_spectrum_list.append(np.nan)
+                            if self.template_index == self.template_index_cache and self.current_denom_polygon_index is not None:
                                 print(self.template_index, self.template_index_cache)
                                 # return the item from self.polygon_table at row index self.current_denom_polygon_index
+                                # if self.current_denom_polygon_index is None:
+                                #     self.current_denom_polygon_index = len(self.all_polygons)
                                 item = self.polygon_table_item_id_row[self.current_denom_polygon_index]
                                 self.polygon_table.delete(item)
                                 self.all_polygons.pop(self.current_denom_polygon_index)
                                 self.polygon_colors.pop(self.current_denom_polygon_index)
+                                self.best_denom_id_list.pop(self.current_denom_polygon_index)
+                                self.ratio_spectrum_list.pop(self.current_denom_polygon_index)
                                 if self.polygon_spectra:
                                     self.polygon_spectra.pop(self.current_denom_polygon_index)
                                 if self.polygons_spectral_window is not None:
@@ -1173,6 +1203,8 @@ class SpectralCubeAnalysisTool:
                             self.current_denom_polygon_index = len(self.all_polygons)
                             self.all_polygons.append(self.denom_polygon)
                             self.polygon_colors.append(self.polygon_color_var.get())
+                            self.best_denom_id_list.append(np.nan)
+                            self.ratio_spectrum_list.append(np.nan)
                             
                             self.extract_spectra_from_single_polygon()
                             # self.extract_spectra_from_polygons()
@@ -1193,7 +1225,7 @@ class SpectralCubeAnalysisTool:
                         self.spectrum = self.left_data[y, x, :].flatten()
                         self.parameter_values = self.right_data[y, x, :].flatten()
                     self.spectrum = np.where(self.spectrum < -1, np.nan, self.spectrum)
-                    self.spectrum = np.where(self.spectrum > 1, np.nan, self.spectrum)
+                    self.spectrum = np.where(self.spectrum > 1.5, np.nan, self.spectrum)
                     self.update_spectral_plot()
                     # clear any previous x's on the image frames
                     self.clear_axes()
@@ -1218,7 +1250,7 @@ class SpectralCubeAnalysisTool:
                         # plot ratio spectra
                         self.denom_spectrum = self.left_data[y, x, :].flatten()
                         self.denom_spectrum = np.where(self.denom_spectrum < 0, np.nan, self.denom_spectrum)
-                        self.denom_spectrum = np.where(self.denom_spectrum > 1, np.nan, self.denom_spectrum)
+                        self.denom_spectrum = np.where(self.denom_spectrum > 1.5, np.nan, self.denom_spectrum)
                         self.ratio_spectrum = self.spectrum / self.denom_spectrum
                         self.update_ratio_spectral_plot()
         else:
@@ -1266,6 +1298,9 @@ class SpectralCubeAnalysisTool:
 
                     self.all_polygons.append(self.current_polygon)
                     self.polygon_colors.append(polygon_color)
+                    self.template_index = len(self.all_polygons) - 1
+                    self.best_denom_id_list.append(np.nan)
+                    self.ratio_spectrum_list.append(np.nan)
 
                     self.current_polygon = []
                     # self.update_polygons_table()
@@ -1293,20 +1328,27 @@ class SpectralCubeAnalysisTool:
         if self.draw_poly_motion_flag:
             self.draw_poly_motion_flag = False
             if self.current_polygon:
-                self.current_polygon.append(self.current_polygon[0]) #close the polygon
-                polygon_color = self.polygon_color_var.get()
+                if len(self.current_polygon) > 2:
+                    self.current_polygon.append(self.current_polygon[0]) #close the polygon
+                    polygon_color = self.polygon_color_var.get()
 
-                self.clear_axes()
-                self.update_left_display()
-                self.update_right_display()
+                    self.clear_axes()
+                    self.update_left_display()
+                    self.update_right_display()
 
-                self.all_polygons.append(self.current_polygon)
-                self.polygon_colors.append(polygon_color)
+                    self.all_polygons.append(self.current_polygon)
+                    self.polygon_colors.append(polygon_color)
+                    self.template_index = len(self.all_polygons) - 1
+                    self.best_denom_id_list.append(np.nan)
+                    self.ratio_spectrum_list.append(np.nan)
 
-                self.current_polygon = []
-                self.extract_spectra_from_single_polygon()
-                # self.extract_spectra_from_polygons()
-                self.draw_all_polygons()
+                    self.current_polygon = []
+                    self.extract_spectra_from_single_polygon()
+                    # self.extract_spectra_from_polygons()
+                    self.draw_all_polygons()
+                else:
+                    self.current_polygon = []
+                    messagebox.showwarning("Warning", "Polygons must have more than 2 points.")
                 
     def on_scroll(self, event):
         # Handle scroll event for the left canvas
@@ -1399,7 +1441,7 @@ class SpectralCubeAnalysisTool:
         # ----------------------------------------------------------------
         # create a dropdown menu to select the polygon color from a list of colors
         self.polygon_color_var = tk.StringVar(ui_frame)
-        self.polygon_color_var.set("red") # default value
+        self.polygon_color_var.set("black") # default value
         mcolors_keys = mcolors.CSS4_COLORS.keys()
         colors_list = [value for value in mcolors_keys]
         self.polygon_color_dropdown = tk.OptionMenu(ui_frame, self.polygon_color_var, *colors_list)
@@ -1415,7 +1457,7 @@ class SpectralCubeAnalysisTool:
     # polygon table functions
     # ------------------------------------------------
     def create_polygons_table(self):
-        self.polygon_table_header_labels = ("Polygon Number", "Color", "Number of Points", "Denominator", "Template", "Mineral ID 1", "Mineral ID 2", "Mineral ID 3", "Mineral ID 4", "wvl", "Spectrum Mean", "params", "Parameters Mean")
+        self.polygon_table_header_labels = ("Polygon Number", "Color", "Number of Points", "Denominator", "Template", "Mineral ID 1", "Mineral ID 2", "Mineral ID 3", "Mineral ID 4", "wvl", "Spectrum Mean", "params", "Parameters Mean", "Best Denom ID", "Ratio Spectrum")
         self.polygon_editing_data = {} 
         self.editing_polygon_table = False
 
@@ -1428,7 +1470,6 @@ class SpectralCubeAnalysisTool:
             self.polygon_table.column(col, width=len(col)*9, anchor=tk.CENTER)  # Set the column width as needed
         
         self.polygon_table.grid(row=1, column=0, columnspan=len(self.polygon_table_header_labels))
-        self.polygon_table.bind("<Double-1>", self.edit_cell)
 
         # Bind right-click to show the context menu
         self.polygon_table.bind("<Button-2>", self.show_context_menu)
@@ -1439,20 +1480,29 @@ class SpectralCubeAnalysisTool:
         # highlight selected polygon
         self.polygon_table.bind("<ButtonRelease-1>", self.highlight_polygon)
 
+        # double click to edit a cell
+        self.polygon_table.bind("<Double-1>", self.edit_cell)
+
         # Create a context menu
         self.context_menu = tk.Menu(self.polygon_table, tearoff=0)
         self.context_menu.add_command(label="Edit", command=self.edit_cell)
         self.context_menu.add_command(label="Delete", command=self.delete_polygon)
         self.context_menu.add_command(label="Plot Spectrum", command=self.plot_selected_polygon)
-        self.context_menu.add_command(label="Plot Ratio Spectrum", command=self.plot_selected_polygon)
+        self.context_menu.add_command(label="Plot Ratio Spectrum", command=lambda: self.plot_selected_polygon(d = True))
 
         self.update_polygons_table()
 
     def update_polygons_table(self):
-        # get the information from the polygons to display in the table
+        # get the information from the polygons to display in the table 13 14 
         if hasattr(self, 'polygons_table_data'):
             if len(self.polygons_table_data) != 0:
                 min_ids = [line[5:9] for line in self.polygons_table_data]
+                if self.upload_polygons_flag == False:
+                    try:
+                        self.best_denom_id_list = [line[13] for line in self.polygons_table_data]
+                        self.ratio_spectrum_list = [line[14] for line in self.polygons_table_data]
+                    except:
+                        print('No best denom id or ratio spectrum')
         self.polygons_table_data = []
         for i, polygon in enumerate(self.all_polygons):
             polygon_number = i
@@ -1460,6 +1510,19 @@ class SpectralCubeAnalysisTool:
             number_of_points = len(polygon) - 1
             denom_check = '[ ]'
             template_check = '[ ]'
+            if self.add_spectrum_flag and self.num_idx == i:
+                if self.denominator_index is not None:
+                    best_denom_id = self.denominator_index
+                    row_ratio_spectrum = self.spectrum
+            else:
+                try:
+                    best_denom_id = self.best_denom_id_list[i]
+                except:
+                    best_denom_id = np.nan
+                try:
+                    row_ratio_spectrum = self.ratio_spectrum_list[i]
+                except:
+                    row_ratio_spectrum = np.nan
             if self.denominator_index == i:
                 denom_check = '[X]'
             if self.template_index == i:
@@ -1468,9 +1531,13 @@ class SpectralCubeAnalysisTool:
                 minid1, minid2, minid3, minid4 = min_ids[i]
             else:
                 minid1, minid2, minid3, minid4 = '', '', '', ''
-            spec_mean = self.polygon_spectra[i]
-            param_mean = self.polygon_params[i]
-            row = (polygon_number, polygon_color, number_of_points, denom_check, template_check, minid1, minid2, minid3, minid4, self.left_wvl, spec_mean, self.right_wvl, param_mean)
+            try:
+                spec_mean = self.polygon_spectra[i]
+                param_mean = self.polygon_params[i]
+            except IndexError:
+                print(f'No means for polygon {i}')
+            
+            row = (polygon_number, polygon_color, number_of_points, denom_check, template_check, minid1, minid2, minid3, minid4, self.left_wvl, spec_mean, self.right_wvl, param_mean, best_denom_id, row_ratio_spectrum)
             self.polygons_table_data.append(row)
 
         for item in self.polygon_table.get_children():
@@ -1480,6 +1547,8 @@ class SpectralCubeAnalysisTool:
         for row in self.polygons_table_data:
             item_id = self.polygon_table.insert("", "end", values=row)
             self.polygon_table_item_id_row.append(item_id)
+        self.add_spectrum_flag = False
+        self.upload_polygons_flag = False
 
     def highlight_polygon(self, event):
         item = self.polygon_table.identify_row(event.y)
@@ -1545,8 +1614,12 @@ class SpectralCubeAnalysisTool:
             self.context_menu.post(event.x_root, event.y_root)
 
     def edit_cell(self, event=None):
-        if event is None:
-            event = self.tmp_event
+        # if event is None:
+        #     event = self.tmp_event
+        if event is not None:
+            self.tmp_event = event
+        event = self.tmp_event
+
         item = self.polygon_table.identify_row(event.y)
         column = self.polygon_table.identify_column(event.x)
         if int(column[1:]) not in (2, 6, 7, 8, 9):
@@ -1589,7 +1662,11 @@ class SpectralCubeAnalysisTool:
             edit_entry.focus_set()
 
             # self.update_polygons_spectral_plot()
- 
+    
+    def add_spectrum_to_table(self):
+        self.add_spectrum_flag = True
+        self.update_polygons_table()
+
     # ------------------------------------------------
     # polygon menu functions
     # ------------------------------------------------
@@ -1648,6 +1725,8 @@ class SpectralCubeAnalysisTool:
             self.polygon_table.delete(item)
             self.all_polygons.pop(pc_index)
             self.polygon_colors.pop(pc_index)
+            self.best_denom_id_list.pop(pc_index)
+            self.ratio_spectrum_list.pop(pc_index)
             if self.polygon_spectra:
                 self.polygon_spectra.pop(pc_index)
             if self.polygons_spectral_window is not None:
@@ -1660,13 +1739,13 @@ class SpectralCubeAnalysisTool:
         else:
             pass
 
-    def plot_selected_polygon(self):
+    def plot_selected_polygon(self, d = None):
         event = self.tmp_event
         item = self.polygon_table.identify_row(event.y)
         pc_index = int(self.polygon_table.item(item, "values")[0])
         ssw = spectral_window #single_spectrum_window
         # ssw.create_window(app, pc_index) #old
-        ssw.create_spectral_plot(app, pc_index)
+        ssw.create_spectral_plot(app, pc_index, d = d)
         # spec = self.polygon_spectra[pc_index]
 
     def clear_all_polygons(self):
@@ -1698,7 +1777,7 @@ class SpectralCubeAnalysisTool:
                 gstats = spectral.calc_stats(data, mask=mask, allow_nan=allow_nan)
                 mean_spectrum = gstats.mean
                 mean_spectrum = np.where(mean_spectrum < 0, np.nan, mean_spectrum)
-                mean_spectrum = np.where(mean_spectrum > 1, np.nan, mean_spectrum)
+                mean_spectrum = np.where(mean_spectrum > 1.5, np.nan, mean_spectrum)
                 return mean_spectrum
 
             mean_spec = calculate_stats(self.ld, mask, True)
@@ -1737,7 +1816,7 @@ class SpectralCubeAnalysisTool:
                     gstats = spectral.calc_stats(data, mask=mask, allow_nan=allow_nan)
                     mean_spectrum = gstats.mean
                     mean_spectrum = np.where(mean_spectrum < 0, np.nan, mean_spectrum)
-                    mean_spectrum = np.where(mean_spectrum > 1, np.nan, mean_spectrum)
+                    mean_spectrum = np.where(mean_spectrum > 1.5, np.nan, mean_spectrum)
                     return mean_spectrum
 
                 # Calculate statistics in parallel
@@ -1793,7 +1872,14 @@ class SpectralCubeAnalysisTool:
                 # Add .gpkg extension if not already present
                 if not filename.lower().endswith('.gpkg'):
                     filename += '.gpkg'
-                    
+
+                # if the file is already present, ask the user if they want to save
+                # Check if file already exists
+                if os.path.exists(filename):
+                    # Ask user if they want to overwrite the file
+                    overwrite = messagebox.askyesno("Overwrite Confirmation", f"The file '{filename}' already exists. Do you want to overwrite it?")
+                    if not overwrite:
+                        return
                 # save the polygons using geopandas and shapely.geometry
                 all_geo_poly_coords = []
                 for poly_coords in self.all_polygons:
@@ -1816,6 +1902,23 @@ class SpectralCubeAnalysisTool:
             messagebox.showwarning("Warning", "No polygons drawn. Draw polygons first.")        
 
     def load_polygons(self):
+        self.upload_polygons_flag = True
+        self.best_denom_id_list = []
+        self.ratio_spectrum_list = []
+        # Function to parse and clean a parameter values vector string
+        def parse_parameter_values(param_str):
+            param_str = param_str.replace('[', '').replace(']', '').replace('\n', '')
+            parameter_values = param_str.split()
+            parameter_values = np.array([float(val) for val in parameter_values])
+            return parameter_values
+        
+        # Function to parse and clean a spectrum string
+        def parse_spectrum(spectrum_str):
+            spectrum_str = spectrum_str.replace('[', '').replace(']', '').replace('\n', '')
+            spectrum_values = spectrum_str.split()
+            spectrum_values = np.array([float(val) for val in spectrum_values])
+            return spectrum_values
+        
         # Ask the user to choose the saved session file
         file_path = filedialog.askopenfilename(
             filetypes=[
@@ -1829,6 +1932,10 @@ class SpectralCubeAnalysisTool:
                 gpf = gpd.read_file(file_path)
             elif file_path.endswith(".gpkg"):
                 gpf = gpd.read_file(file_path, driver="GPKG")
+                mean_spectrum = gpf['Spectrum Mean'].apply(parse_spectrum).tolist()
+                parameter_values = gpf['Parameters Mean'].apply(parse_parameter_values).tolist()
+                # if 'Ratio Spectrum' in gpf.columns:
+                #     ratio_spectra = gpf['Ratio Spectrum'].apply(parse_spectrum).tolist()
             else:
                 # Handle unsupported file types
                 print("Unsupported file type. Please select a .shp or .gpkg file.")
@@ -1846,8 +1953,21 @@ class SpectralCubeAnalysisTool:
                 self.all_polygons.append(polygon_pixel_coords)
                 self.polygon_colors.append(gpf.Color[i])
                 self.restored_min_id_lines.append([gpf.get('Mineral ID 1')[i], gpf.get('Mineral ID 2')[i], gpf.get('Mineral ID 3')[i], gpf.get('Mineral ID 4')[i]])
+                # if the gpf has 'Best Denom ID' column, populate the denominator index
+                if 'Best Denom ID' in gpf.columns:
+                    self.best_denom_id_list.append(gpf.get('Best Denom ID')[i])
+                    print(f'Best Denom ID: {gpf.get("Best Denom ID")[i]}')
+                else:
+                    self.best_denom_id_list.append(np.nan)
+                if 'Ratio Spectrum' in gpf.columns:
+                    self.ratio_spectrum_list.append(gpf.get('Ratio Spectrum')[i])
+                else:
+                    self.ratio_spectrum_list.append(np.nan)
+
+                self.polygon_spectra.append(mean_spectrum[i])
+                self.polygon_params.append(parameter_values[i])
             
-            self.extract_spectra_from_polygons()
+            # self.extract_spectra_from_polygons()
             self.draw_all_polygons()
             print(self.restored_min_id_lines)
             for idx, line in enumerate(self.restored_min_id_lines):
@@ -2842,6 +2962,37 @@ class SpectralCubeAnalysisTool:
         self.spectral_ax.legend()
         self.spectral_canvas.draw()
 
+    def plot_mica_library_spectra(self, event):
+        # plot the selected library spectrum
+        # self.point_plot_library_indices
+        path_to_spec_data = self.mica_spectra_path + event + '.tab'
+        print(path_to_spec_data)
+        mica_df = pd.read_csv(path_to_spec_data, header=None)
+        print(mica_df)
+        library_wvl = mica_df[0].values
+        library_wvl = [val*1000.0 for val in library_wvl]
+        library_reflectance = mica_df[1].values
+        library_reflectance = np.where(library_reflectance>6000, np.nan, library_reflectance)
+        print(library_wvl, library_reflectance)
+        xmin, xmax = self.spectral_ax.get_xlim()
+        ymin, ymax = self.spectral_ax.get_ylim()
+        xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
+        xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
+        # plot the values in spectrum_df on self.spectral_ax 
+        self.spectral_ax.plot(library_wvl, library_reflectance, label=self.mica_library_spectra_var.get())
+        # scale each line so that the min and max values equal the min and max max value of self.spectrum
+        for line in self.spectral_ax.lines[1:]:
+            new_y_data = (line.get_ydata() - np.nanmin(line.get_ydata())) * ((np.nanmax(self.spectrum[xmin_idx:xmax_idx]) - np.nanmin(self.spectrum[xmin_idx:xmax_idx])) / (np.nanmax(line.get_ydata()) - np.nanmin(line.get_ydata()))) + np.nanmin(self.spectrum[xmin_idx:xmax_idx])
+            line.set_ydata(new_y_data)
+            print(new_y_data)
+        # min_y, max_y = np.nanmin(library_reflectance), np.nanmax(library_reflectance)
+        # buffer = (max_y - min_y) * 0.1 
+        # new_y_lim = (np.nanmin((ymin, min_y - buffer)), np.nanmax((ymax, max_y + buffer)))
+        self.spectral_ax.set_ylim((ymin, ymax))
+        self.spectral_ax.set_xlim(xmin, xmax)
+        self.spectral_ax.legend()
+        self.spectral_canvas.draw()
+
     def remove_library_spectra(self):
         # Remove all lines except the first one (assuming it's the main line of the plot)
         for line in self.spectral_ax.lines[1:]:
@@ -3521,6 +3672,8 @@ class SpectralCubeAnalysisTool:
                 "all_polygons": self.all_polygons,
                 "polygon_colors": self.polygon_colors,
                 "polygon_spectra": self.polygon_spectra,
+                "stored_ratio_spectra": self.ratio_spectrum_list,
+                "best_denom_ids": self.best_denom_id_list,
                 "polygon_params": self.polygon_params,
                 "polyong_table_data": self.polygons_table_data,
                 "spectrum": self.spectrum,
@@ -3553,7 +3706,6 @@ class SpectralCubeAnalysisTool:
             self.spectrum = restored_instance['spectrum']
             self.polygons_table_data = restored_instance['polyong_table_data']
             self.ratio_spectrum = restored_instance['ratio_spectrum']
-            self.ratio_spectrum = restored_instance['ratio_spectrum']
             self.bad_bands = restored_instance['bad_bands']
             if self.all_polygons:
                 self.create_polygons_menu_window()
@@ -3571,9 +3723,13 @@ class spectral_window(SpectralCubeAnalysisTool):
     def __init__(self, master):
         super().__init__(master)
 
-    def create_spectral_plot(self, pc_index = None):
+    def create_spectral_plot(self, pc_index = None, d = None):
+        self.num_idx = pc_index
         if pc_index is not None:
-            self.spectrum = self.polygon_spectra[pc_index]
+            if d is not None:
+                self.spectrum = self.polygon_spectra[pc_index] / self.polygon_spectra[self.denominator_index]
+            else:
+                self.spectrum = self.polygon_spectra[pc_index]
             self.spectrum_label = self.polygons_table_data[pc_index][0]
         self.spectral_window = tk.Toplevel(self.root)
         self.spectral_window.title("Spectral Plot")
@@ -3599,6 +3755,10 @@ class spectral_window(SpectralCubeAnalysisTool):
         self.spectral_canvas = FigureCanvasTkAgg(spectral_figure, master=self.spectral_window)
         self.spectral_canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
+        # add a button to save the spectrum
+        self.store_ratio_spectrum = tk.Button(ui_frame, text="Add Spectrum to Table", command=self.add_spectrum_to_table)
+        self.store_ratio_spectrum.pack(side=tk.TOP)
+
         # add a button to turn the legend on or off
         self.toggle_legend_button = tk.Button(ui_frame, text="Legend (On)", command=self.toggle_spectral_plot_legend)
         self.toggle_legend_button.pack(side=tk.TOP)
@@ -3621,6 +3781,7 @@ class spectral_window(SpectralCubeAnalysisTool):
         self.ignore_bad_bands_button = tk.Button(ui_frame, text="Ignore Bad Bands (Off)", command=self.toggle_ignore_bad_bands)
         self.ignore_bad_bands_button.pack(side=tk.TOP)
 
+        # USGS LIBRAY SPECTRA
         # add a drop down menu to plot library spectra, contents of the drop down menu are the library spectra located in the library_spectra folder
         self.library_spectra_var = tk.StringVar(ui_frame)
         self.library_spectra_var.set("None") # default value
@@ -3628,11 +3789,24 @@ class spectral_window(SpectralCubeAnalysisTool):
         # sort library_spectra_list alphabetically
         self.library_spectra_list.sort()
         # label the librar spectra drop down menu "library spectra"
-        self.library_spectra_label = tk.Label(ui_frame, text="Library Spectra")
+        self.library_spectra_label = tk.Label(ui_frame, text="USGS Library Spectra")
         self.library_spectra_label.pack(side=tk.TOP)
         # create the drop down menu
         self.library_spectra_dropdown = tk.OptionMenu(ui_frame, self.library_spectra_var, *self.library_spectra_list, command=self.plot_library_spectra)
         self.library_spectra_dropdown.pack(side=tk.TOP)
+
+        # MICA LIBRARY SPECTRA
+        # add a drop down menu to plot the library spectra, contents of the drop down menu are the library spectra located in the self.mica_library_spectra folder
+        self.mica_library_spectra_var = tk.StringVar(ui_frame)
+        self.mica_library_spectra_var.set("None") #default value
+        self.mica_library_spectra_list = [name.split(".")[0].split('/')[-1] for name in self.mica_spectra_names]
+        # sort mica_library_spectra_list alphabetically
+        self.mica_library_spectra_list.sort()
+        self.mica_library_spectra_label = tk.Label(ui_frame, text="MICA Library Spectra")
+        self.mica_library_spectra_label.pack(side=tk.TOP)
+        # create the drop down menu
+        self.mica_library_spectra_dropdown = tk.OptionMenu(ui_frame, self.mica_library_spectra_var, *self.mica_library_spectra_list, command=self.plot_mica_library_spectra)
+        self.mica_library_spectra_dropdown.pack(side=tk.TOP)
 
         # add a button to remove library spectra from the plot
         self.remove_library_spectra_button = tk.Button(ui_frame, text="Remove Library Spectra", command=self.remove_library_spectra)
@@ -3704,6 +3878,7 @@ class single_spectrum_window(SpectralCubeAnalysisTool):
         self.ignore_bad_bands_button = tk.Button(ui_frame, text="Ignore Bad Bands (Off)", command=self.toggle_ignore_bad_bands)
         self.ignore_bad_bands_button.pack(side=tk.TOP)
 
+        # USGS LIBRARY SPECTRA
         # add a drop down menu to plot library spectra, contents of the drop down menu are the library spectra located in the library_spectra folder
         self.library_spectra_var = tk.StringVar(ui_frame)
         self.library_spectra_var.set("None") # default value
@@ -3716,6 +3891,19 @@ class single_spectrum_window(SpectralCubeAnalysisTool):
         # create the drop down menu
         self.library_spectra_dropdown = tk.OptionMenu(ui_frame, self.library_spectra_var, *self.library_spectra_list, command=self.plot_library_spectra)
         self.library_spectra_dropdown.pack(side=tk.TOP)
+
+        # MICA LIBRARY SPECTRA
+        # add a drop down menu to plot the library spectra, contents of the drop down menu are the library spectra located in the self.mica_library_spectra folder
+        self.mica_library_spectra_var = tk.StringVar(ui_frame)
+        self.mica_library_spectra_var.set("None") #default value
+        self.mica_library_spectra_list = [name.split(".")[0].split('/')[-1] for name in self.mica_spectra_names]
+        # sort mica_library_spectra_list alphabetically
+        self.mica_library_spectra_list.sort()
+        self.mica_library_spectra_label = tk.Label(ui_frame, text="MICA Library Spectra")
+        self.mica_library_spectra_label.pack(side=tk.TOP)
+        # create the drop down menu
+        self.mica_library_spectra_dropdown = tk.OptionMenu(ui_frame, self.mica_library_spectra_var, *self.mica_library_spectra_list, command=self.plot_mica_library_spectra)
+        self.mica_library_spectra_dropdown.pack(side=tk.TOP)
 
         # add a button to remove library spectra from the plot
         self.remove_library_spectra_button = tk.Button(ui_frame, text="Remove Library Spectra", command=self.remove_library_spectra)
