@@ -2097,7 +2097,7 @@ class SpectralCubeAnalysisTool:
         params = (self.right_wvl, self.parameter_values)
         # get geolocation from x, y
         lon, lat = self.left_rio.xy(y, x)
-        if self.denom_spectrum:
+        if self.denom_spectrum is not None:
             denom = self.denom_spectrum
         else:
             denom = ""
