@@ -132,6 +132,10 @@ class SpectralCubeAnalysisTool:
         self.best_denom_id_list = []
         self.add_spectrum_flag = False
         self.bad_bands = None
+        # Library spectra tracking for stretch/offset controls
+        # Format: {name: {'line': line_obj, 'original_y': array, 'stretch': 1.0, 'offset': 0.0, 'wvl': array}}
+        self.library_spectra_data = {}
+        self.library_spectra_controls_frame = None
         self.collected_points = pd.DataFrame(
             columns=(
                 "name",
@@ -2484,17 +2488,33 @@ class SpectralCubeAnalysisTool:
             self.context_menu.post(event.x_root, event.y_root)
 
     def edit_cell(self, event=None):
-        # if event is None:
-        #     event = self.tmp_event
+        # Store event for later use (right-click menu calls with event=None)
         if event is not None:
             self.tmp_event = event
         event = self.tmp_event
 
+        # Get item and column from event coordinates
         item = self.polygon_table.identify_row(event.y)
         column = self.polygon_table.identify_column(event.x)
-        if int(column[1:]) not in (2, 6, 7, 8, 9):
+
+        # Fallback to current selection if identify_row returns empty
+        if not item:
+            selection = self.polygon_table.selection()
+            if selection:
+                item = selection[0]
+            else:
+                return
+
+        # Check if column is valid and editable
+        if not column or column == '#0':
             return
-        cell_value = self.polygon_table.item(item, "values")[int(column[1:]) - 1]
+        col_num = int(column[1:])
+        if col_num not in (2, 6, 7, 8, 9):
+            return
+
+        cell_value = self.polygon_table.item(item, "values")[col_num - 1]
+        # Get polygon number (first column) - this is stable across table refreshes
+        pc_index = int(self.polygon_table.item(item, "values")[0])
 
         if not self.editing_polygon_table:
             self.polygon_editing_data[item, column] = (
@@ -2509,16 +2529,34 @@ class SpectralCubeAnalysisTool:
             edit_entry.insert(0, cell_value)
             edit_entry.pack()
 
+            # Capture values for closure - use pc_index instead of item ID
+            # since item IDs can change if the table is refreshed
+            captured_pc_index = pc_index
+            captured_column = column
+            captured_col_num = col_num
+
             def save_and_close():
                 new_value = edit_entry.get()
-                self.polygon_table.set(item, column, new_value)
-                pc_index = int(self.polygon_table.item(item, "values")[0])
-                if int(column[1:]) == 2:
-                    self.polygon_colors[pc_index] = new_value
+
+                # Find the current item ID for this polygon number
+                current_item = None
+                for tree_item in self.polygon_table.get_children():
+                    if int(self.polygon_table.item(tree_item, "values")[0]) == captured_pc_index:
+                        current_item = tree_item
+                        break
+
+                if current_item is None:
+                    print(f"Warning: Could not find polygon {captured_pc_index} in table")
+                    edit_window.destroy()
+                    return
+
+                self.polygon_table.set(current_item, captured_column, new_value)
+                if captured_col_num == 2:
+                    self.polygon_colors[captured_pc_index] = new_value
                 else:
-                    updated_row = list(self.polygons_table_data[pc_index])
-                    updated_row[int(column[1:]) - 1] = new_value
-                    self.polygons_table_data[pc_index] = tuple(updated_row)
+                    updated_row = list(self.polygons_table_data[captured_pc_index])
+                    updated_row[captured_col_num - 1] = new_value
+                    self.polygons_table_data[captured_pc_index] = tuple(updated_row)
                 self.draw_all_polygons()
                 self.update_polygons_spectral_plot()
                 edit_window.destroy()
@@ -2528,7 +2566,7 @@ class SpectralCubeAnalysisTool:
             save_button.pack()
 
             # Bind the "Return" key to the "Save" button's functionality
-            edit_window.bind("<Return>", lambda event: save_and_close())
+            edit_window.bind("<Return>", lambda e: save_and_close())
 
             # Focus on the Entry widget
             edit_entry.focus_set()
@@ -4227,10 +4265,10 @@ class SpectralCubeAnalysisTool:
 
     def plot_library_spectra(self, event):
         # plot the selected library spectrum
-        # self.point_plot_library_indices
-        path_to_spec_data = self.usgs_spectra_path + event + "/" + event + ".txt"
+        spec_name = event
+        path_to_spec_data = self.usgs_spectra_path + spec_name + "/" + spec_name + ".txt"
         path_to_wvl_data = (
-            self.usgs_spectra_path + event + "/" + "*Wavelengths*" + ".txt"
+            self.usgs_spectra_path + spec_name + "/" + "*Wavelengths*" + ".txt"
         )
         print(path_to_spec_data)
         library_wvl = getWavelengthFromUSGS(path_to_wvl_data)
@@ -4239,73 +4277,190 @@ class SpectralCubeAnalysisTool:
         ymin, ymax = self.spectral_ax.get_ylim()
         xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
         xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
-        # plot the values in spectrum_df on self.spectral_ax
-        self.spectral_ax.plot(
-            library_wvl, library_reflectance, label=self.library_spectra_var.get()
-        )
-        # scale each line so that the min and max values equal the min and max max value of self.spectrum
-        for line in self.spectral_ax.lines[1:]:
-            new_y_data = (line.get_ydata() - np.nanmin(line.get_ydata())) * (
-                (
-                    np.nanmax(self.spectrum[xmin_idx:xmax_idx])
-                    - np.nanmin(self.spectrum[xmin_idx:xmax_idx])
-                )
-                / (np.nanmax(line.get_ydata()) - np.nanmin(line.get_ydata()))
-            ) + np.nanmin(self.spectrum[xmin_idx:xmax_idx])
-            line.set_ydata(new_y_data)
-        # min_y, max_y = np.nanmin(library_reflectance), np.nanmax(library_reflectance)
-        # buffer = (max_y - min_y) * 0.1
-        # new_y_lim = (np.nanmin((ymin, min_y - buffer)), np.nanmax((ymax, max_y + buffer)))
+
+        # Scale library spectrum to match data range
+        scaled_reflectance = (library_reflectance - np.nanmin(library_reflectance)) * (
+            (np.nanmax(self.spectrum[xmin_idx:xmax_idx]) - np.nanmin(self.spectrum[xmin_idx:xmax_idx]))
+            / (np.nanmax(library_reflectance) - np.nanmin(library_reflectance))
+        ) + np.nanmin(self.spectrum[xmin_idx:xmax_idx])
+
+        # Plot and get line reference
+        (line,) = self.spectral_ax.plot(library_wvl, scaled_reflectance, label=spec_name)
+
+        # Store library spectrum data for stretch/offset controls
+        self.library_spectra_data[spec_name] = {
+            'line': line,
+            'original_y': scaled_reflectance.copy(),
+            'wvl': library_wvl,
+            'stretch': 1.0,
+            'offset': 0.0
+        }
+
         self.spectral_ax.set_ylim((ymin, ymax))
         self.spectral_ax.set_xlim(xmin, xmax)
         self.spectral_ax.legend()
         self.spectral_canvas.draw()
 
+        # Update stretch/offset controls
+        self.update_library_spectra_controls()
+
+    def update_library_spectra_controls(self):
+        """Create or update the stretch/offset controls for library spectra."""
+        # Create controls frame if it doesn't exist
+        if self.library_spectra_controls_frame is None or not self.library_spectra_controls_frame.winfo_exists():
+            self.library_spectra_controls_frame = tk.Toplevel(self.spectral_window)
+            self.library_spectra_controls_frame.title("Library Spectra Controls")
+            self.library_spectra_controls_frame.geometry("400x300")
+
+        # Clear existing controls
+        for widget in self.library_spectra_controls_frame.winfo_children():
+            widget.destroy()
+
+        if not self.library_spectra_data:
+            tk.Label(self.library_spectra_controls_frame, text="No library spectra loaded").pack()
+            return
+
+        # Create scrollable frame
+        canvas = tk.Canvas(self.library_spectra_controls_frame)
+        scrollbar = ttk.Scrollbar(self.library_spectra_controls_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Create controls for each library spectrum
+        for spec_name, spec_data in self.library_spectra_data.items():
+            frame = ttk.LabelFrame(scrollable_frame, text=spec_name, padding=5)
+            frame.pack(fill="x", padx=5, pady=5)
+
+            # Stretch controls
+            stretch_frame = ttk.Frame(frame)
+            stretch_frame.pack(fill="x")
+            ttk.Label(stretch_frame, text="Stretch:", width=8).pack(side="left")
+
+            stretch_var = tk.DoubleVar(value=spec_data['stretch'])
+            stretch_entry = ttk.Entry(stretch_frame, textvariable=stretch_var, width=8)
+            stretch_entry.pack(side="left", padx=2)
+
+            stretch_scale = ttk.Scale(stretch_frame, from_=0.1, to=3.0, variable=stretch_var, orient="horizontal", length=120)
+            stretch_scale.pack(side="left", padx=2)
+
+            ttk.Button(stretch_frame, text="-", width=2,
+                       command=lambda n=spec_name, v=stretch_var: self.adjust_stretch(n, v, -0.01)).pack(side="left")
+            ttk.Button(stretch_frame, text="+", width=2,
+                       command=lambda n=spec_name, v=stretch_var: self.adjust_stretch(n, v, 0.01)).pack(side="left")
+
+            # Offset controls
+            offset_frame = ttk.Frame(frame)
+            offset_frame.pack(fill="x")
+            ttk.Label(offset_frame, text="Offset:", width=8).pack(side="left")
+
+            offset_var = tk.DoubleVar(value=spec_data['offset'])
+            offset_entry = ttk.Entry(offset_frame, textvariable=offset_var, width=8)
+            offset_entry.pack(side="left", padx=2)
+
+            # Get y-range for offset scale
+            y_range = np.nanmax(self.spectrum) - np.nanmin(self.spectrum)
+            offset_scale = ttk.Scale(offset_frame, from_=-y_range, to=y_range, variable=offset_var, orient="horizontal", length=120)
+            offset_scale.pack(side="left", padx=2)
+
+            ttk.Button(offset_frame, text="-", width=2,
+                       command=lambda n=spec_name, v=offset_var, r=y_range: self.adjust_offset(n, v, -r*0.005)).pack(side="left")
+            ttk.Button(offset_frame, text="+", width=2,
+                       command=lambda n=spec_name, v=offset_var, r=y_range: self.adjust_offset(n, v, r*0.005)).pack(side="left")
+
+            # Bind variable changes to update function
+            stretch_var.trace_add("write", lambda *args, n=spec_name, sv=stretch_var, ov=offset_var:
+                                  self.apply_stretch_offset(n, sv.get(), ov.get()))
+            offset_var.trace_add("write", lambda *args, n=spec_name, sv=stretch_var, ov=offset_var:
+                                 self.apply_stretch_offset(n, sv.get(), ov.get()))
+
+    def adjust_stretch(self, spec_name, var, delta):
+        """Adjust stretch value by delta."""
+        new_val = max(0.1, min(3.0, var.get() + delta))
+        var.set(round(new_val, 3))
+
+    def adjust_offset(self, spec_name, var, delta):
+        """Adjust offset value by delta."""
+        var.set(round(var.get() + delta, 6))
+
+    def apply_stretch_offset(self, spec_name, stretch, offset):
+        """Apply stretch and offset to a library spectrum."""
+        if spec_name not in self.library_spectra_data:
+            return
+
+        spec_data = self.library_spectra_data[spec_name]
+        spec_data['stretch'] = stretch
+        spec_data['offset'] = offset
+
+        # Calculate new y data: (original * stretch) + offset
+        new_y = (spec_data['original_y'] * stretch) + offset
+        spec_data['line'].set_ydata(new_y)
+
+        self.spectral_canvas.draw()
+
     def plot_mica_library_spectra(self, event):
-        # plot the selected library spectrum
-        # self.point_plot_library_indices
+        # plot the selected MICA library spectrum
+        spec_name = "MICA:" + event
         path_to_spec_data = self.mica_spectra_path + event + ".tab"
         print(path_to_spec_data)
         mica_df = pd.read_csv(path_to_spec_data, header=None)
-        print(mica_df)
-        library_wvl = mica_df[0].values
-        library_wvl = [val * 1000.0 for val in library_wvl]
+        library_wvl = mica_df[0].values * 1000.0  # Convert to nm
         library_reflectance = mica_df[1].values
         library_reflectance = np.where(
             library_reflectance > 6000, np.nan, library_reflectance
         )
-        print(library_wvl, library_reflectance)
+
         xmin, xmax = self.spectral_ax.get_xlim()
         ymin, ymax = self.spectral_ax.get_ylim()
         xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
         xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
-        # plot the values in spectrum_df on self.spectral_ax
-        self.spectral_ax.plot(
-            library_wvl, library_reflectance, label=self.mica_library_spectra_var.get()
-        )
-        # scale each line so that the min and max values equal the min and max max value of self.spectrum
-        for line in self.spectral_ax.lines[1:]:
-            new_y_data = (line.get_ydata() - np.nanmin(line.get_ydata())) * (
-                (
-                    np.nanmax(self.spectrum[xmin_idx:xmax_idx])
-                    - np.nanmin(self.spectrum[xmin_idx:xmax_idx])
-                )
-                / (np.nanmax(line.get_ydata()) - np.nanmin(line.get_ydata()))
-            ) + np.nanmin(self.spectrum[xmin_idx:xmax_idx])
-            line.set_ydata(new_y_data)
-            print(new_y_data)
-        # min_y, max_y = np.nanmin(library_reflectance), np.nanmax(library_reflectance)
-        # buffer = (max_y - min_y) * 0.1
-        # new_y_lim = (np.nanmin((ymin, min_y - buffer)), np.nanmax((ymax, max_y + buffer)))
+
+        # Scale library spectrum to match data range
+        scaled_reflectance = (library_reflectance - np.nanmin(library_reflectance)) * (
+            (np.nanmax(self.spectrum[xmin_idx:xmax_idx]) - np.nanmin(self.spectrum[xmin_idx:xmax_idx]))
+            / (np.nanmax(library_reflectance) - np.nanmin(library_reflectance))
+        ) + np.nanmin(self.spectrum[xmin_idx:xmax_idx])
+
+        # Plot and get line reference
+        (line,) = self.spectral_ax.plot(library_wvl, scaled_reflectance, label=event)
+
+        # Store library spectrum data for stretch/offset controls
+        self.library_spectra_data[spec_name] = {
+            'line': line,
+            'original_y': scaled_reflectance.copy(),
+            'wvl': library_wvl,
+            'stretch': 1.0,
+            'offset': 0.0
+        }
+
         self.spectral_ax.set_ylim((ymin, ymax))
         self.spectral_ax.set_xlim(xmin, xmax)
         self.spectral_ax.legend()
         self.spectral_canvas.draw()
+
+        # Update stretch/offset controls
+        self.update_library_spectra_controls()
 
     def remove_library_spectra(self):
         # Remove all lines except the first one (assuming it's the main line of the plot)
         for line in self.spectral_ax.lines[1:]:
             line.remove()
+
+        # Clear library spectra tracking data
+        self.library_spectra_data = {}
+
+        # Close controls window if open
+        if self.library_spectra_controls_frame is not None and self.library_spectra_controls_frame.winfo_exists():
+            self.library_spectra_controls_frame.destroy()
 
         # Update the plot
         self.update_spectral_plot()
@@ -5275,6 +5430,10 @@ class spectral_window(SpectralCubeAnalysisTool):
 
     def create_spectral_plot(self, pc_index=None, d=None):
         self.num_idx = pc_index
+        # Initialize library spectra tracking for this window
+        self.library_spectra_data = {}
+        self.library_spectra_controls_frame = None
+
         if pc_index is not None:
             if d is not None:
                 self.spectrum = (
