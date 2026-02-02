@@ -9,6 +9,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 import spectral
 import numpy as np
 import rasterio as rio
+from rasterio.warp import transform as rio_transform
 import cv2
 import geopandas as gpd
 from shapely.geometry import Polygon as sgp
@@ -84,13 +85,17 @@ class SpectralCubeAnalysisTool:
             3,
             2,
             1,
-        ]  # Default bands for RGB display of spectral data
+        ]  # Fallback indices for RGB display of spectral data
+        # Target wavelengths for CRISM spectral cubes (in nm)
+        self.default_rgb_wavelengths = [2330.0, 1500.0, 774.0]  # R, G, B
         self.default_parameter_bands = [
             3,
             2,
             1,
-        ]  # Default bands for RGB display of parameter data, MAF
-        self.default_stretch = "linear"  # Default stretch for RGB display
+        ]  # Fallback indices for RGB display of parameter data
+        # Target band names for CRISM parameter images
+        self.default_parameter_names = ["BD1300", "RPEAK1", "LCPINDEX2"]  # R, G, B
+        self.default_stretch = "Percentile"  # Default stretch method for RGB display
         self.create_main_ui()
         self.create_menu()
         self.spectral_window = None
@@ -103,7 +108,7 @@ class SpectralCubeAnalysisTool:
         self.right_hist_window = None
         self.left_hist_window = None
         self.right_is_parameter = False
-        self.left_is_paramenter = False
+        self.left_is_parameter = False
         self.reset_right_hist = False
         self.reset_left_hist = False
         self.draw_polygons = False
@@ -133,7 +138,7 @@ class SpectralCubeAnalysisTool:
         self.add_spectrum_flag = False
         self.bad_bands = None
         # Library spectra tracking for stretch/offset controls
-        # Format: {name: {'line': line_obj, 'original_y': array, 'stretch': 1.0, 'offset': 0.0, 'wvl': array}}
+        # Format: {name: {'line': line_obj, 'original_y': array, 'stretch': 1.0, 'offset': 0.0, 'anchor': value, 'pivot': value, 'wvl': array}}
         self.library_spectra_data = {}
         self.library_spectra_controls_frame = None
         self.collected_points = pd.DataFrame(
@@ -259,58 +264,75 @@ class SpectralCubeAnalysisTool:
         )
         self.apply_button.grid(row=3, column=0, columnspan=2, sticky=tk.W)
 
+        # Stretch type selector for left canvas
+        self.left_stretch_type_label = tk.Label(self.button_frame, text="Stretch:")
+        self.left_stretch_type_label.grid(row=4, column=0, sticky=tk.W)
+
+        self.left_stretch_type_var = tk.StringVar(value=self.default_stretch)
+        self.left_stretch_type_menu = ttk.Combobox(
+            self.button_frame, textvariable=self.left_stretch_type_var,
+            values=["Percentile", "Sigma Clip", "Hist. Equalization"],
+            state="readonly", width=15
+        )
+        self.left_stretch_type_menu.grid(row=4, column=1, sticky=tk.W)
+
         # Create RGB stretch value options for left canvas
         self.left_red_stretch_label = tk.Label(self.button_frame, text="Red Stretch:")
-        self.left_red_stretch_label.grid(row=4, column=0, sticky=tk.W)
+        self.left_red_stretch_label.grid(row=5, column=0, sticky=tk.W)
 
         self.left_red_min_stretch_var = tk.DoubleVar(value=0.0)
         self.left_red_min_stretch_entry = tk.Entry(
             self.button_frame, textvariable=self.left_red_min_stretch_var
         )
-        self.left_red_min_stretch_entry.grid(row=5, column=0, sticky=tk.W)
+        self.left_red_min_stretch_entry.grid(row=6, column=0, sticky=tk.W)
 
         self.left_red_max_stretch_var = tk.DoubleVar(value=1.0)
         self.left_red_max_stretch_entry = tk.Entry(
             self.button_frame, textvariable=self.left_red_max_stretch_var
         )
-        self.left_red_max_stretch_entry.grid(row=5, column=1, sticky=tk.W)
+        self.left_red_max_stretch_entry.grid(row=6, column=1, sticky=tk.W)
 
         self.left_green_stretch_label = tk.Label(
             self.button_frame, text="Green Stretch:"
         )
-        self.left_green_stretch_label.grid(row=6, column=0, sticky=tk.W)
+        self.left_green_stretch_label.grid(row=7, column=0, sticky=tk.W)
 
         self.left_green_min_stretch_var = tk.DoubleVar(value=0.0)
         self.left_green_min_stretch_entry = tk.Entry(
             self.button_frame, textvariable=self.left_green_min_stretch_var
         )
-        self.left_green_min_stretch_entry.grid(row=7, column=0, sticky=tk.W)
+        self.left_green_min_stretch_entry.grid(row=8, column=0, sticky=tk.W)
 
         self.left_green_max_stretch_var = tk.DoubleVar(value=1.0)
         self.left_green_max_stretch_entry = tk.Entry(
             self.button_frame, textvariable=self.left_green_max_stretch_var
         )
-        self.left_green_max_stretch_entry.grid(row=7, column=1, sticky=tk.W)
+        self.left_green_max_stretch_entry.grid(row=8, column=1, sticky=tk.W)
 
         self.left_blue_stretch_label = tk.Label(self.button_frame, text="Blue Stretch:")
-        self.left_blue_stretch_label.grid(row=8, column=0, sticky=tk.W)
+        self.left_blue_stretch_label.grid(row=9, column=0, sticky=tk.W)
 
         self.left_blue_min_stretch_var = tk.DoubleVar(value=0.0)
         self.left_blue_min_stretch_entry = tk.Entry(
             self.button_frame, textvariable=self.left_blue_min_stretch_var
         )
-        self.left_blue_min_stretch_entry.grid(row=9, column=0, sticky=tk.W)
+        self.left_blue_min_stretch_entry.grid(row=10, column=0, sticky=tk.W)
 
         self.left_blue_max_stretch_var = tk.DoubleVar(value=1.0)
         self.left_blue_max_stretch_entry = tk.Entry(
             self.button_frame, textvariable=self.left_blue_max_stretch_var
         )
-        self.left_blue_max_stretch_entry.grid(row=9, column=1, sticky=tk.W)
+        self.left_blue_max_stretch_entry.grid(row=10, column=1, sticky=tk.W)
 
         self.apply_stretch_button = tk.Button(
             self.button_frame, text="Apply Stretch", command=self.update_left_display
         )
-        self.apply_stretch_button.grid(row=10, column=0, columnspan=2, sticky=tk.W)
+        self.apply_stretch_button.grid(row=11, column=0, sticky=tk.W)
+
+        self.auto_stretch_left_button = tk.Button(
+            self.button_frame, text="Auto Stretch", command=self.auto_stretch_left
+        )
+        self.auto_stretch_left_button.grid(row=11, column=1, sticky=tk.W)
 
         # ----------------------------------------------------------------
         # Create a sub-frame for the right canvas buttons
@@ -359,60 +381,77 @@ class SpectralCubeAnalysisTool:
         )
         self.apply_button.grid(row=3, column=0, columnspan=2, sticky=tk.W)
 
+        # Stretch type selector for right canvas
+        self.right_stretch_type_label = tk.Label(self.button_frame, text="Stretch:")
+        self.right_stretch_type_label.grid(row=4, column=0, sticky=tk.W)
+
+        self.right_stretch_type_var = tk.StringVar(value=self.default_stretch)
+        self.right_stretch_type_menu = ttk.Combobox(
+            self.button_frame, textvariable=self.right_stretch_type_var,
+            values=["Percentile", "Sigma Clip", "Hist. Equalization"],
+            state="readonly", width=15
+        )
+        self.right_stretch_type_menu.grid(row=4, column=1, sticky=tk.W)
+
         # Create RGB stretch value options for the right canvas
         self.right_red_stretch_label = tk.Label(self.button_frame, text="Red Stretch:")
-        self.right_red_stretch_label.grid(row=4, column=0, sticky=tk.W)
+        self.right_red_stretch_label.grid(row=5, column=0, sticky=tk.W)
 
         self.right_red_min_stretch_var = tk.DoubleVar(value=0.0)
         self.right_red_min_stretch_entry = tk.Entry(
             self.button_frame, textvariable=self.right_red_min_stretch_var
         )
-        self.right_red_min_stretch_entry.grid(row=5, column=0, sticky=tk.W)
+        self.right_red_min_stretch_entry.grid(row=6, column=0, sticky=tk.W)
 
         self.right_red_max_stretch_var = tk.DoubleVar(value=1.0)
         self.right_red_max_stretch_entry = tk.Entry(
             self.button_frame, textvariable=self.right_red_max_stretch_var
         )
-        self.right_red_max_stretch_entry.grid(row=5, column=1, sticky=tk.W)
+        self.right_red_max_stretch_entry.grid(row=6, column=1, sticky=tk.W)
 
         self.right_green_stretch_label = tk.Label(
             self.button_frame, text="Green Stretch:"
         )
-        self.right_green_stretch_label.grid(row=6, column=0, sticky=tk.W)
+        self.right_green_stretch_label.grid(row=7, column=0, sticky=tk.W)
 
         self.right_green_min_stretch_var = tk.DoubleVar(value=0.0)
         self.right_green_min_stretch_entry = tk.Entry(
             self.button_frame, textvariable=self.right_green_min_stretch_var
         )
-        self.right_green_min_stretch_entry.grid(row=7, column=0, sticky=tk.W)
+        self.right_green_min_stretch_entry.grid(row=8, column=0, sticky=tk.W)
 
         self.right_green_max_stretch_var = tk.DoubleVar(value=1.0)
         self.right_green_max_stretch_entry = tk.Entry(
             self.button_frame, textvariable=self.right_green_max_stretch_var
         )
-        self.right_green_max_stretch_entry.grid(row=7, column=1, sticky=tk.W)
+        self.right_green_max_stretch_entry.grid(row=8, column=1, sticky=tk.W)
 
         self.right_blue_stretch_label = tk.Label(
             self.button_frame, text="Blue Stretch:"
         )
-        self.right_blue_stretch_label.grid(row=8, column=0, sticky=tk.W)
+        self.right_blue_stretch_label.grid(row=9, column=0, sticky=tk.W)
 
         self.right_blue_min_stretch_var = tk.DoubleVar(value=0.0)
         self.right_blue_min_stretch_entry = tk.Entry(
             self.button_frame, textvariable=self.right_blue_min_stretch_var
         )
-        self.right_blue_min_stretch_entry.grid(row=9, column=0, sticky=tk.W)
+        self.right_blue_min_stretch_entry.grid(row=10, column=0, sticky=tk.W)
 
         self.right_blue_max_stretch_var = tk.DoubleVar(value=1.0)
         self.right_blue_max_stretch_entry = tk.Entry(
             self.button_frame, textvariable=self.right_blue_max_stretch_var
         )
-        self.right_blue_max_stretch_entry.grid(row=9, column=1, sticky=tk.W)
+        self.right_blue_max_stretch_entry.grid(row=10, column=1, sticky=tk.W)
 
         self.apply_stretch_button = tk.Button(
             self.button_frame, text="Apply Stretch", command=self.update_right_display
         )
-        self.apply_stretch_button.grid(row=10, column=0, columnspan=2, sticky=tk.W)
+        self.apply_stretch_button.grid(row=11, column=0, sticky=tk.W)
+
+        self.auto_stretch_right_button = tk.Button(
+            self.button_frame, text="Auto Stretch", command=self.auto_stretch_right
+        )
+        self.auto_stretch_right_button.grid(row=11, column=1, sticky=tk.W)
 
         # Configure rows and columns to expand with resizing
         self.button_frame.grid_columnconfigure(
@@ -734,53 +773,35 @@ class SpectralCubeAnalysisTool:
             self.left_red_band_menu["values"] = wavelengths
             self.left_green_band_menu["values"] = wavelengths
             self.left_blue_band_menu["values"] = wavelengths
-            self.left_red_band_menu.set(wavelengths[self.default_rgb_bands[0]])
-            self.left_green_band_menu.set(wavelengths[self.default_rgb_bands[1]])
-            self.left_blue_band_menu.set(wavelengths[self.default_rgb_bands[2]])
 
-            def calculate_stretch_limits(image, channel_index):
-                # Calculate outlier before defining stretch limits
-                channel_data = image[:, :, channel_index]
-                channel_data = np.where(
-                    (channel_data > -1) & (channel_data < 1), channel_data, np.nan
-                )
-                mean_value = np.nanmean(channel_data)
-                std_dev = np.nanstd(channel_data)
-                z_scores = (channel_data - mean_value) / std_dev
+            # Find default band indices based on target wavelengths or band names
+            if self.left_is_parameter:
+                default_indices = self.get_default_parameter_indices(wavelengths)
+            else:
+                default_indices = self.get_default_spectral_indices(wavelengths)
 
-                # Define a threshold for considering values as outliers (e.g., z-score > 3)
-                outliers = np.abs(z_scores) > 3
+            self.left_red_band_menu.set(wavelengths[default_indices[0]])
+            self.left_green_band_menu.set(wavelengths[default_indices[1]])
+            self.left_blue_band_menu.set(wavelengths[default_indices[2]])
 
-                # Calculate statistics on non-outlier values
-                non_outliers = channel_data[~outliers]
+            # Calculate and set stretch limits for each channel
+            red_index, green_index, blue_index = default_indices
+            method = self.left_stretch_type_var.get()
 
-                # Calculate stretch limits
-                min_stretch = np.nanmean(non_outliers) - 2 * np.nanstd(non_outliers)
-                max_stretch = np.nanmean(non_outliers) + 2 * np.nanstd(non_outliers)
-
-                return min_stretch, max_stretch
-
-            # default_rgb_bands contains the indices for red, green, and blue channels
-            red_index, green_index, blue_index = self.default_rgb_bands
-
-            # Calculate stretch limits for each channel
-            red_min_stretch, red_max_stretch = calculate_stretch_limits(
-                self.left_data, red_index
+            red_min_stretch, red_max_stretch = self.calculate_stretch_limits(
+                self.left_data[:, :, red_index], method
             )
-            green_min_stretch, green_max_stretch = calculate_stretch_limits(
-                self.left_data, green_index
+            green_min_stretch, green_max_stretch = self.calculate_stretch_limits(
+                self.left_data[:, :, green_index], method
             )
-            blue_min_stretch, blue_max_stretch = calculate_stretch_limits(
-                self.left_data, blue_index
+            blue_min_stretch, blue_max_stretch = self.calculate_stretch_limits(
+                self.left_data[:, :, blue_index], method
             )
 
-            # Set the stretch limits variables for each channel
             self.left_red_min_stretch_var.set(red_min_stretch)
             self.left_red_max_stretch_var.set(red_max_stretch)
-
             self.left_green_min_stretch_var.set(green_min_stretch)
             self.left_green_max_stretch_var.set(green_max_stretch)
-
             self.left_blue_min_stretch_var.set(blue_min_stretch)
             self.left_blue_max_stretch_var.set(blue_max_stretch)
 
@@ -851,61 +872,38 @@ class SpectralCubeAnalysisTool:
                 self.right_wvl = wavelengths
                 messagebox.showerror("Error", "Unable to load wavelength information.")
 
-            if len(wavelengths) < np.max(self.default_parameter_bands):
-                self.default_parameter_bands = [2, 1, 0]
-
             self.right_red_band_menu["values"] = wavelengths
             self.right_green_band_menu["values"] = wavelengths
             self.right_blue_band_menu["values"] = wavelengths
-            self.right_red_band_menu.set(wavelengths[self.default_parameter_bands[0]])
-            self.right_green_band_menu.set(wavelengths[self.default_parameter_bands[1]])
-            self.right_blue_band_menu.set(wavelengths[self.default_parameter_bands[2]])
 
-            def calculate_stretch_limits(image, channel_index):
-                # Calculate median and median absolute deviation (MAD)
-                channel_data = image[:, :, channel_index]
-                median_value = np.nanmedian(channel_data)
-                mad = np.nanmedian(np.abs(channel_data - median_value))
+            # Find default band indices based on target band names or wavelengths
+            if self.right_is_parameter:
+                default_indices = self.get_default_parameter_indices(wavelengths)
+            else:
+                default_indices = self.get_default_spectral_indices(wavelengths)
 
-                # Define a threshold for considering values as outliers (e.g., 3 times MAD)
-                threshold = 2 * mad
+            self.right_red_band_menu.set(wavelengths[default_indices[0]])
+            self.right_green_band_menu.set(wavelengths[default_indices[1]])
+            self.right_blue_band_menu.set(wavelengths[default_indices[2]])
 
-                # Clip values beyond the threshold to focus on the main Gaussian distribution
-                channel_data_clipped = np.clip(
-                    channel_data, median_value - threshold, median_value + threshold
-                )
+            # Calculate and set stretch limits for each channel in the "right_data"
+            red_index, green_index, blue_index = default_indices
+            method = self.right_stretch_type_var.get()
 
-                # Calculate stretch limits
-                min_stretch = np.nanmean(channel_data_clipped) - 2 * np.nanstd(
-                    channel_data_clipped
-                )
-                max_stretch = np.nanmean(channel_data_clipped) + 2 * np.nanstd(
-                    channel_data_clipped
-                )
-
-                return min_stretch, max_stretch
-
-            # default_rgb_bands contains the indices for red, green, and blue channels
-            red_index, green_index, blue_index = self.default_parameter_bands
-
-            # Calculate stretch limits for each channel in the "right_data"
-            right_red_min_stretch, right_red_max_stretch = calculate_stretch_limits(
-                self.right_data, red_index
+            right_red_min_stretch, right_red_max_stretch = self.calculate_stretch_limits(
+                self.right_data[:, :, red_index], method
             )
-            right_green_min_stretch, right_green_max_stretch = calculate_stretch_limits(
-                self.right_data, green_index
+            right_green_min_stretch, right_green_max_stretch = self.calculate_stretch_limits(
+                self.right_data[:, :, green_index], method
             )
-            right_blue_min_stretch, right_blue_max_stretch = calculate_stretch_limits(
-                self.right_data, blue_index
+            right_blue_min_stretch, right_blue_max_stretch = self.calculate_stretch_limits(
+                self.right_data[:, :, blue_index], method
             )
 
-            # Set the stretch limits variables for each channel in the "right_data"
             self.right_red_min_stretch_var.set(right_red_min_stretch)
             self.right_red_max_stretch_var.set(right_red_max_stretch)
-
             self.right_green_min_stretch_var.set(right_green_min_stretch)
             self.right_green_max_stretch_var.set(right_green_max_stretch)
-
             self.right_blue_min_stretch_var.set(right_blue_min_stretch)
             self.right_blue_max_stretch_var.set(right_blue_max_stretch)
 
@@ -995,17 +993,18 @@ class SpectralCubeAnalysisTool:
             :, :, [band_indices[0], band_indices[1], band_indices[2]]
         ]
 
+        method = self.left_stretch_type_var.get() if hasattr(self, 'left_stretch_type_var') else "linear"
         if left_red_stretch is not None:
             left_rgb_image[:, :, 0] = self.stretch_band(
-                left_rgb_image[:, :, 0], left_red_stretch
+                left_rgb_image[:, :, 0], left_red_stretch, method
             )
         if left_green_stretch is not None:
             left_rgb_image[:, :, 1] = self.stretch_band(
-                left_rgb_image[:, :, 1], left_green_stretch
+                left_rgb_image[:, :, 1], left_green_stretch, method
             )
         if left_blue_stretch is not None:
             left_rgb_image[:, :, 2] = self.stretch_band(
-                left_rgb_image[:, :, 2], left_blue_stretch
+                left_rgb_image[:, :, 2], left_blue_stretch, method
             )
 
         self.left_ax.imshow(np.array(left_rgb_image))
@@ -1044,17 +1043,18 @@ class SpectralCubeAnalysisTool:
             :, :, [band_indices[0], band_indices[1], band_indices[2]]
         ]
 
+        method = self.right_stretch_type_var.get() if hasattr(self, 'right_stretch_type_var') else "linear"
         if right_red_stretch is not None:
             right_rgb_image[:, :, 0] = self.stretch_band(
-                right_rgb_image[:, :, 0], right_red_stretch
+                right_rgb_image[:, :, 0], right_red_stretch, method
             )
         if right_green_stretch is not None:
             right_rgb_image[:, :, 1] = self.stretch_band(
-                right_rgb_image[:, :, 1], right_green_stretch
+                right_rgb_image[:, :, 1], right_green_stretch, method
             )
         if right_blue_stretch is not None:
             right_rgb_image[:, :, 2] = self.stretch_band(
-                right_rgb_image[:, :, 2], right_blue_stretch
+                right_rgb_image[:, :, 2], right_blue_stretch, method
             )
 
         self.right_ax.imshow(np.array(right_rgb_image))
@@ -1076,30 +1076,17 @@ class SpectralCubeAnalysisTool:
         green_index = self.left_wvl.index(green_band)
         blue_index = self.left_wvl.index(blue_band)
 
-        self.left_red_min_stretch_var.set(
-            np.nanmedian(self.left_data[:, :, red_index])
-            - np.nanquantile(self.left_data[:, :, red_index], 0.6)
-        )
-        self.left_red_max_stretch_var.set(
-            np.nanmedian(self.left_data[:, :, red_index])
-            + np.nanquantile(self.left_data[:, :, red_index], 0.6)
-        )
-        self.left_green_min_stretch_var.set(
-            np.nanmedian(self.left_data[:, :, green_index])
-            - np.nanquantile(self.left_data[:, :, green_index], 0.6)
-        )
-        self.left_green_max_stretch_var.set(
-            np.nanmedian(self.left_data[:, :, green_index])
-            + np.nanquantile(self.left_data[:, :, green_index], 0.6)
-        )
-        self.left_blue_min_stretch_var.set(
-            np.nanmedian(self.left_data[:, :, blue_index])
-            - np.nanquantile(self.left_data[:, :, blue_index], 0.6)
-        )
-        self.left_blue_max_stretch_var.set(
-            np.nanmedian(self.left_data[:, :, blue_index])
-            + np.nanquantile(self.left_data[:, :, blue_index], 0.6)
-        )
+        method = self.left_stretch_type_var.get()
+        r_min, r_max = self.calculate_stretch_limits(self.left_data[:, :, red_index], method)
+        g_min, g_max = self.calculate_stretch_limits(self.left_data[:, :, green_index], method)
+        b_min, b_max = self.calculate_stretch_limits(self.left_data[:, :, blue_index], method)
+
+        self.left_red_min_stretch_var.set(r_min)
+        self.left_red_max_stretch_var.set(r_max)
+        self.left_green_min_stretch_var.set(g_min)
+        self.left_green_max_stretch_var.set(g_max)
+        self.left_blue_min_stretch_var.set(b_min)
+        self.left_blue_max_stretch_var.set(b_max)
 
         self.update_left_display()
 
@@ -1117,41 +1104,185 @@ class SpectralCubeAnalysisTool:
         green_index = self.right_wvl.index(green_band)
         blue_index = self.right_wvl.index(blue_band)
 
-        self.right_red_min_stretch_var.set(
-            np.nanmedian(self.right_data[:, :, red_index])
-            - np.nanquantile(self.right_data[:, :, red_index], 0.6)
-        )
-        self.right_red_max_stretch_var.set(
-            np.nanmedian(self.right_data[:, :, red_index])
-            + np.nanquantile(self.right_data[:, :, red_index], 0.6)
-        )
-        self.right_green_min_stretch_var.set(
-            np.nanmedian(self.right_data[:, :, green_index])
-            - np.nanquantile(self.right_data[:, :, green_index], 0.6)
-        )
-        self.right_green_max_stretch_var.set(
-            np.nanmedian(self.right_data[:, :, green_index])
-            + np.nanquantile(self.right_data[:, :, green_index], 0.6)
-        )
-        self.right_blue_min_stretch_var.set(
-            np.nanmedian(self.right_data[:, :, blue_index])
-            - np.nanquantile(self.right_data[:, :, blue_index], 0.6)
-        )
-        self.right_blue_max_stretch_var.set(
-            np.nanmedian(self.right_data[:, :, blue_index])
-            + np.nanquantile(self.right_data[:, :, blue_index], 0.6)
-        )
+        method = self.right_stretch_type_var.get()
+        r_min, r_max = self.calculate_stretch_limits(self.right_data[:, :, red_index], method)
+        g_min, g_max = self.calculate_stretch_limits(self.right_data[:, :, green_index], method)
+        b_min, b_max = self.calculate_stretch_limits(self.right_data[:, :, blue_index], method)
+
+        self.right_red_min_stretch_var.set(r_min)
+        self.right_red_max_stretch_var.set(r_max)
+        self.right_green_min_stretch_var.set(g_min)
+        self.right_green_max_stretch_var.set(g_max)
+        self.right_blue_min_stretch_var.set(b_min)
+        self.right_blue_max_stretch_var.set(b_max)
 
         self.update_right_display()
 
     # ----------------------------------------------------------------
     # histograms and stretching
     # ----------------------------------------------------------------
-    def stretch_band(self, band, stretch_range):
+    def stretch_band(self, band, stretch_range, method="linear"):
+        if method == "Hist. Equalization":
+            return self.histogram_equalize_band(band)
         min_val, max_val = stretch_range
+        if min_val >= max_val:
+            # Prevent division by zero or inverted stretch
+            max_val = min_val + 1e-10
         stretched_band = (band - min_val) / (max_val - min_val)
         stretched_band = np.clip(stretched_band, 0, 1)
         return stretched_band
+
+    def histogram_equalize_band(self, band):
+        # Flatten and get valid pixels (exclude zeros, NaNs, and CRISM fill value 65535)
+        flat = band.flatten()
+        valid_mask = (np.isfinite(flat) & (flat != 0) &
+                      (flat != 65535.0) & (flat != 65535))
+        valid_data = flat[valid_mask]
+        if len(valid_data) == 0:
+            return np.zeros_like(band)
+        # Build CDF from valid data
+        sorted_data = np.sort(valid_data)
+        cdf = np.arange(1, len(sorted_data) + 1) / len(sorted_data)
+        # Map all pixels using the CDF
+        equalized = np.interp(band, sorted_data, cdf)
+        # Set invalid pixels to 0
+        invalid_mask = (~np.isfinite(band) | (band == 0) |
+                        (band == 65535.0) | (band == 65535))
+        equalized[invalid_mask] = 0
+        return equalized
+
+    def calculate_stretch_limits(self, channel_data, method="Percentile"):
+        # Filter out zeros (padding), NaNs, and CRISM fill value (65535)
+        valid_mask = (np.isfinite(channel_data) &
+                      (channel_data != 0) &
+                      (channel_data != 65535.0) &
+                      (channel_data != 65535))
+        valid_data = channel_data[valid_mask]
+
+        if len(valid_data) == 0:
+            return 0.0, 1.0
+
+        if method == "Percentile":
+            min_stretch = np.percentile(valid_data, 2)
+            max_stretch = np.percentile(valid_data, 98)
+        elif method == "Sigma Clip":
+            # Iterative sigma clipping: remove 3-sigma outliers, then use mean +/- 2*std
+            clipped = valid_data.copy()
+            for _ in range(3):
+                mean_val = np.mean(clipped)
+                std_val = np.std(clipped)
+                if std_val == 0:
+                    break
+                mask = np.abs(clipped - mean_val) < 3 * std_val
+                if not np.any(mask):
+                    break
+                clipped = clipped[mask]
+            mean_val = np.mean(clipped)
+            std_val = np.std(clipped)
+            min_stretch = mean_val - 2 * std_val
+            max_stretch = mean_val + 2 * std_val
+        else:
+            # Fallback to percentile
+            min_stretch = np.percentile(valid_data, 2)
+            max_stretch = np.percentile(valid_data, 98)
+
+        # Ensure min < max
+        if min_stretch >= max_stretch:
+            max_stretch = min_stretch + 1e-10
+
+        return float(min_stretch), float(max_stretch)
+
+    def auto_stretch_left(self):
+        if not hasattr(self, 'left_data') or self.left_data is None:
+            return
+        method = self.left_stretch_type_var.get()
+        if method == "Hist. Equalization":
+            # For equalization, just update display directly
+            self.update_left_display()
+            return
+        red_index = self.left_wvl.index(float(self.left_red_band_var.get()))
+        green_index = self.left_wvl.index(float(self.left_green_band_var.get()))
+        blue_index = self.left_wvl.index(float(self.left_blue_band_var.get()))
+
+        r_min, r_max = self.calculate_stretch_limits(self.left_data[:, :, red_index], method)
+        g_min, g_max = self.calculate_stretch_limits(self.left_data[:, :, green_index], method)
+        b_min, b_max = self.calculate_stretch_limits(self.left_data[:, :, blue_index], method)
+
+        self.left_red_min_stretch_var.set(r_min)
+        self.left_red_max_stretch_var.set(r_max)
+        self.left_green_min_stretch_var.set(g_min)
+        self.left_green_max_stretch_var.set(g_max)
+        self.left_blue_min_stretch_var.set(b_min)
+        self.left_blue_max_stretch_var.set(b_max)
+        self.update_left_display()
+
+    def auto_stretch_right(self):
+        if not hasattr(self, 'right_data') or self.right_data is None:
+            return
+        method = self.right_stretch_type_var.get()
+        if method == "Hist. Equalization":
+            self.update_right_display()
+            return
+        if self.right_is_parameter:
+            red_band = self.right_red_band_var.get()
+            green_band = self.right_green_band_var.get()
+            blue_band = self.right_blue_band_var.get()
+            red_index = list(self.right_data.bands.centers).index(red_band)
+            green_index = list(self.right_data.bands.centers).index(green_band)
+            blue_index = list(self.right_data.bands.centers).index(blue_band)
+        else:
+            red_index = self.right_wvl.index(float(self.right_red_band_var.get()))
+            green_index = self.right_wvl.index(float(self.right_green_band_var.get()))
+            blue_index = self.right_wvl.index(float(self.right_blue_band_var.get()))
+
+        r_min, r_max = self.calculate_stretch_limits(self.right_data[:, :, red_index], method)
+        g_min, g_max = self.calculate_stretch_limits(self.right_data[:, :, green_index], method)
+        b_min, b_max = self.calculate_stretch_limits(self.right_data[:, :, blue_index], method)
+
+        self.right_red_min_stretch_var.set(r_min)
+        self.right_red_max_stretch_var.set(r_max)
+        self.right_green_min_stretch_var.set(g_min)
+        self.right_green_max_stretch_var.set(g_max)
+        self.right_blue_min_stretch_var.set(b_min)
+        self.right_blue_max_stretch_var.set(b_max)
+        self.update_right_display()
+
+    def find_closest_wavelength_index(self, wavelengths, target_wvl):
+        """Find the index of the wavelength closest to target_wvl."""
+        wvl_array = np.array([float(w) for w in wavelengths])
+        idx = np.argmin(np.abs(wvl_array - target_wvl))
+        return int(idx)
+
+    def find_band_name_index(self, band_names, target_name):
+        """Find the index of a band by name (case-insensitive partial match)."""
+        target_upper = target_name.upper()
+        for i, name in enumerate(band_names):
+            if target_upper in str(name).upper():
+                return i
+        return None
+
+    def get_default_spectral_indices(self, wavelengths):
+        """Get indices for default CRISM RGB wavelengths (2330, 1500, 774 nm)."""
+        r_idx = self.find_closest_wavelength_index(wavelengths, self.default_rgb_wavelengths[0])
+        g_idx = self.find_closest_wavelength_index(wavelengths, self.default_rgb_wavelengths[1])
+        b_idx = self.find_closest_wavelength_index(wavelengths, self.default_rgb_wavelengths[2])
+        return [r_idx, g_idx, b_idx]
+
+    def get_default_parameter_indices(self, band_names):
+        """Get indices for default CRISM parameter bands (BD1300, RPEAK1, LCPINDEX2)."""
+        indices = []
+        for target in self.default_parameter_names:
+            idx = self.find_band_name_index(band_names, target)
+            if idx is not None:
+                indices.append(idx)
+            else:
+                # Fallback: use position in default list
+                fallback_idx = len(indices)
+                if fallback_idx < len(band_names):
+                    indices.append(fallback_idx)
+                else:
+                    indices.append(0)
+        return indices
 
     def plot_left_histograms(self):
         if hasattr(self, "left_data"):
@@ -2012,8 +2143,37 @@ class SpectralCubeAnalysisTool:
 
     def on_canvas_motion(self, event):
         if hasattr(self, "left_data") and event.inaxes:
-            lon, lat = self.left_rio.xy(event.ydata, event.xdata)
-            coordinate_text = f"Lat: {lat:.4f}, Lon: {lon:.4f}"
+            # Get coordinates in native CRS (typically meters for projected data)
+            x_proj, y_proj = self.left_rio.xy(event.ydata, event.xdata)
+
+            # Transform to geographic coordinates (decimal degrees)
+            if self.left_rio.crs is not None:
+                try:
+                    # Determine the appropriate geographic CRS based on the source CRS
+                    source_crs = self.left_rio.crs
+
+                    # For Mars data (IAU codes typically 49900+), use IAU:49900
+                    # For Earth data (EPSG codes), use EPSG:4326
+                    if 'IAU' in str(source_crs).upper() or '49900' in str(source_crs):
+                        target_crs = 'IAU:49900'  # Mars geographic
+                    else:
+                        target_crs = 'EPSG:4326'  # Earth geographic (WGS84)
+
+                    # Transform from projected to geographic coordinates
+                    lon, lat = rio_transform(
+                        source_crs,
+                        target_crs,
+                        [x_proj],
+                        [y_proj]
+                    )
+                    coordinate_text = f"Lat: {lat[0]:.6f}, Lon: {lon[0]:.6f}"
+                except Exception as e:
+                    # If transformation fails, show native coordinates
+                    coordinate_text = f"X: {x_proj:.2f}, Y: {y_proj:.2f} (meters)"
+            else:
+                # Fallback if no CRS info
+                coordinate_text = f"X: {x_proj:.2f}, Y: {y_proj:.2f}"
+
             self.coordinates_label.config(text=coordinate_text)
             self.left_canvas.draw()
         if (
@@ -2739,6 +2899,7 @@ class SpectralCubeAnalysisTool:
 
             mean_spec = calculate_stats(self.ld, mask, True)
             mean_param = calculate_stats(self.rd, mask, True, spec_data = False)
+
             # Calculate statistics for the left data
             if polygon_index != -1:
                 print("here")
@@ -3598,14 +3759,18 @@ class SpectralCubeAnalysisTool:
             all_min_y = []
             all_max_y = []
             for s in self.polygon_spectra:
-                min_y, max_y = np.nanmin(s[xmin_idx:xmax_idx]), np.nanmax(
-                    s[xmin_idx:xmax_idx]
-                )
-                all_min_y.append(min_y)
-                all_max_y.append(max_y)
-            min_y, max_y = np.nanmin(all_min_y), np.nanmax(all_max_y)
-            buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
-            self.polygons_spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
+                # Check if the spectrum slice has any valid data
+                spectrum_slice = s[xmin_idx:xmax_idx]
+                if not np.all(np.isnan(spectrum_slice)):
+                    min_y, max_y = np.nanmin(spectrum_slice), np.nanmax(spectrum_slice)
+                    all_min_y.append(min_y)
+                    all_max_y.append(max_y)
+
+            # Only set limits if we have valid data
+            if all_min_y and all_max_y:
+                min_y, max_y = np.nanmin(all_min_y), np.nanmax(all_max_y)
+                buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
+                self.polygons_spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
             self.polygons_spectral_canvas.draw()
         else:
             self.polygons_spectral_ax.clear()
@@ -4278,22 +4443,35 @@ class SpectralCubeAnalysisTool:
         xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
         xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
 
+        # Check if spectrum has valid data for scaling
+        spectrum_slice = self.spectrum[xmin_idx:xmax_idx]
+        if np.all(np.isnan(spectrum_slice)):
+            messagebox.showwarning(
+                "Warning",
+                "Cannot add library spectrum: ROI spectrum contains no valid data."
+            )
+            return
+
         # Scale library spectrum to match data range
         scaled_reflectance = (library_reflectance - np.nanmin(library_reflectance)) * (
-            (np.nanmax(self.spectrum[xmin_idx:xmax_idx]) - np.nanmin(self.spectrum[xmin_idx:xmax_idx]))
+            (np.nanmax(spectrum_slice) - np.nanmin(spectrum_slice))
             / (np.nanmax(library_reflectance) - np.nanmin(library_reflectance))
-        ) + np.nanmin(self.spectrum[xmin_idx:xmax_idx])
+        ) + np.nanmin(spectrum_slice)
 
         # Plot and get line reference
         (line,) = self.spectral_ax.plot(library_wvl, scaled_reflectance, label=spec_name)
 
         # Store library spectrum data for stretch/offset controls
+        # Store the fixed pivot (median) and initialize anchor offset to 0
+        pivot_value = np.nanmedian(scaled_reflectance)
         self.library_spectra_data[spec_name] = {
             'line': line,
             'original_y': scaled_reflectance.copy(),
             'wvl': library_wvl,
             'stretch': 1.0,
-            'offset': 0.0
+            'offset': 0.0,
+            'anchor': pivot_value,
+            'pivot': pivot_value  # Fixed reference point for stretching
         }
 
         self.spectral_ax.set_ylim((ymin, ymax))
@@ -4350,13 +4528,14 @@ class SpectralCubeAnalysisTool:
             stretch_entry = ttk.Entry(stretch_frame, textvariable=stretch_var, width=8)
             stretch_entry.pack(side="left", padx=2)
 
-            stretch_scale = ttk.Scale(stretch_frame, from_=0.1, to=3.0, variable=stretch_var, orient="horizontal", length=120)
+            # Expanded range: 0.01 to 10.0 for more flexibility
+            stretch_scale = ttk.Scale(stretch_frame, from_=0.01, to=10.0, variable=stretch_var, orient="horizontal", length=120)
             stretch_scale.pack(side="left", padx=2)
 
             ttk.Button(stretch_frame, text="-", width=2,
-                       command=lambda n=spec_name, v=stretch_var: self.adjust_stretch(n, v, -0.01)).pack(side="left")
+                       command=lambda n=spec_name, v=stretch_var: self.adjust_stretch(n, v, -0.05)).pack(side="left")
             ttk.Button(stretch_frame, text="+", width=2,
-                       command=lambda n=spec_name, v=stretch_var: self.adjust_stretch(n, v, 0.01)).pack(side="left")
+                       command=lambda n=spec_name, v=stretch_var: self.adjust_stretch(n, v, 0.05)).pack(side="left")
 
             # Offset controls
             offset_frame = ttk.Frame(frame)
@@ -4367,45 +4546,126 @@ class SpectralCubeAnalysisTool:
             offset_entry = ttk.Entry(offset_frame, textvariable=offset_var, width=8)
             offset_entry.pack(side="left", padx=2)
 
-            # Get y-range for offset scale
+            # Get y-range for offset scale - use larger range (3x spectrum range)
             y_range = np.nanmax(self.spectrum) - np.nanmin(self.spectrum)
-            offset_scale = ttk.Scale(offset_frame, from_=-y_range, to=y_range, variable=offset_var, orient="horizontal", length=120)
+            offset_scale = ttk.Scale(offset_frame, from_=-y_range*3, to=y_range*3, variable=offset_var, orient="horizontal", length=120)
             offset_scale.pack(side="left", padx=2)
 
             ttk.Button(offset_frame, text="-", width=2,
-                       command=lambda n=spec_name, v=offset_var, r=y_range: self.adjust_offset(n, v, -r*0.005)).pack(side="left")
+                       command=lambda n=spec_name, v=offset_var, r=y_range: self.adjust_offset(n, v, -r*0.01)).pack(side="left")
             ttk.Button(offset_frame, text="+", width=2,
-                       command=lambda n=spec_name, v=offset_var, r=y_range: self.adjust_offset(n, v, r*0.005)).pack(side="left")
+                       command=lambda n=spec_name, v=offset_var, r=y_range: self.adjust_offset(n, v, r*0.01)).pack(side="left")
 
-            # Bind variable changes to update function
-            stretch_var.trace_add("write", lambda *args, n=spec_name, sv=stretch_var, ov=offset_var:
-                                  self.apply_stretch_offset(n, sv.get(), ov.get()))
-            offset_var.trace_add("write", lambda *args, n=spec_name, sv=stretch_var, ov=offset_var:
-                                 self.apply_stretch_offset(n, sv.get(), ov.get()))
+            # Anchor controls
+            anchor_frame = ttk.Frame(frame)
+            anchor_frame.pack(fill="x")
+            ttk.Label(anchor_frame, text="Anchor:", width=8).pack(side="left")
+
+            anchor_var = tk.DoubleVar(value=spec_data['anchor'])
+            anchor_entry = ttk.Entry(anchor_frame, textvariable=anchor_var, width=8)
+            anchor_entry.pack(side="left", padx=2)
+
+            # Anchor scale based on broader range (2x spectrum range centered on median)
+            spec_median = np.nanmedian(spec_data['original_y'])
+            spec_range = np.nanmax(spec_data['original_y']) - np.nanmin(spec_data['original_y'])
+            anchor_scale = ttk.Scale(anchor_frame, from_=spec_median - spec_range, to=spec_median + spec_range,
+                                    variable=anchor_var, orient="horizontal", length=120)
+            anchor_scale.pack(side="left", padx=2)
+
+            ttk.Button(anchor_frame, text="-", width=2,
+                       command=lambda n=spec_name, v=anchor_var, r=y_range: self.adjust_anchor(n, v, -r*0.01)).pack(side="left")
+            ttk.Button(anchor_frame, text="+", width=2,
+                       command=lambda n=spec_name, v=anchor_var, r=y_range: self.adjust_anchor(n, v, r*0.01)).pack(side="left")
+
+            # Bind variable changes to update function with error handling
+            def safe_update_wrapper(spec_name, stretch_var, offset_var, anchor_var):
+                """Wrapper to safely handle variable updates with validation."""
+                try:
+                    stretch = stretch_var.get()
+                    offset = offset_var.get()
+                    anchor = anchor_var.get()
+                    self.apply_stretch_offset(spec_name, stretch, offset, anchor)
+                except (tk.TclError, ValueError):
+                    # Ignore errors from incomplete input (e.g., typing "-" or "0.")
+                    pass
+
+            stretch_var.trace_add("write", lambda *args, n=spec_name, sv=stretch_var, ov=offset_var, av=anchor_var:
+                                  safe_update_wrapper(n, sv, ov, av))
+            offset_var.trace_add("write", lambda *args, n=spec_name, sv=stretch_var, ov=offset_var, av=anchor_var:
+                                 safe_update_wrapper(n, sv, ov, av))
+            anchor_var.trace_add("write", lambda *args, n=spec_name, sv=stretch_var, ov=offset_var, av=anchor_var:
+                                 safe_update_wrapper(n, sv, ov, av))
+
+            # Reset button to restore default values
+            reset_frame = ttk.Frame(frame)
+            reset_frame.pack(fill="x", pady=5)
+            ttk.Button(reset_frame, text="Reset to Defaults",
+                      command=lambda n=spec_name, sv=stretch_var, ov=offset_var, av=anchor_var, p=spec_data['pivot']:
+                      self.reset_library_spectrum(n, sv, ov, av, p)).pack()
 
     def adjust_stretch(self, spec_name, var, delta):
         """Adjust stretch value by delta."""
-        new_val = max(0.1, min(3.0, var.get() + delta))
+        new_val = max(0.01, var.get() + delta)  # Minimum 0.01, no maximum
         var.set(round(new_val, 3))
 
     def adjust_offset(self, spec_name, var, delta):
         """Adjust offset value by delta."""
         var.set(round(var.get() + delta, 6))
 
-    def apply_stretch_offset(self, spec_name, stretch, offset):
-        """Apply stretch and offset to a library spectrum."""
+    def adjust_anchor(self, spec_name, var, delta):
+        """Adjust anchor value by delta."""
+        var.set(round(var.get() + delta, 6))
+
+    def reset_library_spectrum(self, spec_name, stretch_var, offset_var, anchor_var, pivot):
+        """Reset library spectrum to default values."""
+        stretch_var.set(1.0)
+        offset_var.set(0.0)
+        anchor_var.set(pivot)
+
+    def apply_stretch_offset(self, spec_name, stretch, offset, anchor):
+        """
+        Apply stretch and offset to a library spectrum using an anchor point.
+
+        The spectrum is stretched around a fixed pivot point (original median),
+        then shifted vertically by the anchor value.
+        Formula: new_y = anchor + stretch * (original_y - pivot) + offset
+
+        Parameters:
+        -----------
+        spec_name : str
+            Name of the library spectrum
+        stretch : float
+            Stretch factor (multiplies deviation from pivot)
+        offset : float
+            Additional vertical offset applied after stretching
+        anchor : float
+            Vertical position for the pivot point (increases anchor moves spectrum up)
+        """
         if spec_name not in self.library_spectra_data:
             return
 
-        spec_data = self.library_spectra_data[spec_name]
-        spec_data['stretch'] = stretch
-        spec_data['offset'] = offset
+        try:
+            # Validate inputs
+            stretch = float(stretch)
+            offset = float(offset)
+            anchor = float(anchor)
 
-        # Calculate new y data: (original * stretch) + offset
-        new_y = (spec_data['original_y'] * stretch) + offset
-        spec_data['line'].set_ydata(new_y)
+            spec_data = self.library_spectra_data[spec_name]
+            spec_data['stretch'] = stretch
+            spec_data['offset'] = offset
+            spec_data['anchor'] = anchor
 
-        self.spectral_canvas.draw()
+            # Calculate new y data: anchor + stretch * (original - pivot) + offset
+            # Pivot is fixed (original median), anchor controls vertical position
+            original_y = spec_data['original_y']
+            pivot = spec_data['pivot']
+            new_y = anchor + stretch * (original_y - pivot) + offset
+            spec_data['line'].set_ydata(new_y)
+
+            self.spectral_canvas.draw()
+        except (ValueError, TypeError, KeyError) as e:
+            # Silently ignore invalid input during typing
+            pass
 
     def plot_mica_library_spectra(self, event):
         # plot the selected MICA library spectrum
@@ -4424,22 +4684,35 @@ class SpectralCubeAnalysisTool:
         xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
         xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
 
+        # Check if spectrum has valid data for scaling
+        spectrum_slice = self.spectrum[xmin_idx:xmax_idx]
+        if np.all(np.isnan(spectrum_slice)):
+            messagebox.showwarning(
+                "Warning",
+                "Cannot add library spectrum: ROI spectrum contains no valid data."
+            )
+            return
+
         # Scale library spectrum to match data range
         scaled_reflectance = (library_reflectance - np.nanmin(library_reflectance)) * (
-            (np.nanmax(self.spectrum[xmin_idx:xmax_idx]) - np.nanmin(self.spectrum[xmin_idx:xmax_idx]))
+            (np.nanmax(spectrum_slice) - np.nanmin(spectrum_slice))
             / (np.nanmax(library_reflectance) - np.nanmin(library_reflectance))
-        ) + np.nanmin(self.spectrum[xmin_idx:xmax_idx])
+        ) + np.nanmin(spectrum_slice)
 
         # Plot and get line reference
         (line,) = self.spectral_ax.plot(library_wvl, scaled_reflectance, label=event)
 
         # Store library spectrum data for stretch/offset controls
+        # Store the fixed pivot (median) and initialize anchor offset to 0
+        pivot_value = np.nanmedian(scaled_reflectance)
         self.library_spectra_data[spec_name] = {
             'line': line,
             'original_y': scaled_reflectance.copy(),
             'wvl': library_wvl,
             'stretch': 1.0,
-            'offset': 0.0
+            'offset': 0.0,
+            'anchor': pivot_value,
+            'pivot': pivot_value  # Fixed reference point for stretching
         }
 
         self.spectral_ax.set_ylim((ymin, ymax))
@@ -4485,26 +4758,112 @@ class SpectralCubeAnalysisTool:
                 "No bad bands set. Set bad bands first. (Processing > Select Bad Bands)",
             )
 
+    def toggle_1um_offset_correction(self):
+        """Toggle the 1µm offset correction for CRISM spectra."""
+        if self.offset_correction_applied:
+            # Turn off correction
+            self.offset_correction_applied = False
+            self.correct_offset_button.config(
+                text="Correct 1µm Offset (Off)", relief="sunken"
+            )
+        else:
+            # Turn on correction
+            self.offset_correction_applied = True
+            self.correct_offset_button.config(
+                text="Correct 1µm Offset (On)", relief="raised"
+            )
+        self.update_spectral_plot()
+
+    def apply_1um_offset_correction(self, spectrum):
+        """
+        Correct the 1µm offset in CRISM spectra.
+
+        This corrects the discontinuity between short-wave and long-wave detectors
+        around 1000nm by adjusting the short-wavelength values to align with the
+        long-wavelength values.
+
+        Parameters:
+        -----------
+        spectrum : np.ndarray
+            The input spectrum to correct
+
+        Returns:
+        --------
+        corrected_spectrum : np.ndarray
+            The corrected spectrum
+        """
+        wvl = np.array(self.left_wvl)
+
+        # Find the index closest to 1000nm (1µm)
+        detector_boundary_idx = np.argmin(np.abs(wvl - 1000))
+
+        # Define windows around the detector boundary
+        # Use 5 samples before and after the boundary
+        window_size = 5
+
+        # Get shortwave side (just before the boundary)
+        sw_start = max(0, detector_boundary_idx - window_size)
+        sw_end = detector_boundary_idx
+
+        # Get longwave side (just after the boundary)
+        lw_start = detector_boundary_idx + 1
+        lw_end = min(len(spectrum), detector_boundary_idx + window_size + 1)
+
+        # Calculate medians on each side of the boundary
+        sw_values = spectrum[sw_start:sw_end]
+        lw_values = spectrum[lw_start:lw_end]
+
+        # Only calculate if we have valid data on both sides
+        if len(sw_values) > 0 and len(lw_values) > 0:
+            # Use nanmedian to ignore NaN values
+            sw_median = np.nanmedian(sw_values)
+            lw_median = np.nanmedian(lw_values)
+
+            # Check if we got valid medians
+            if not np.isnan(sw_median) and not np.isnan(lw_median):
+                # Calculate the offset
+                offset = lw_median - sw_median
+
+                # Apply correction: add offset to all shortwave values
+                corrected_spectrum = spectrum.copy()
+                corrected_spectrum[:detector_boundary_idx] += offset
+
+                return corrected_spectrum
+
+        # If correction couldn't be applied, return original spectrum
+        return spectrum
+
     def update_spectral_plot(self):
         if self.spectral_window is None or not self.spectral_window.winfo_exists():
             print("creating spectral plot")
             self.create_spectral_plot()
         else:
+            # Start from original spectrum and apply corrections
+            self.spectrum = self.original_spectrum.copy()
+
+            # Apply 1µm offset correction if enabled
+            if self.offset_correction_applied:
+                self.spectrum = self.apply_1um_offset_correction(self.spectrum)
+
+            # Apply bad bands masking if enabled
             if self.ignore_bad_bands_flag:
                 self.spectrum = np.where(
                     np.array(self.bad_bands) == 0, np.nan, self.spectrum
                 )
+
             self.spectral_line.set_ydata(self.spectrum)
             self.spectral_line.set_label(self.spectrum_label)
             self.spectral_ax.legend()
             xmin, xmax = self.spectral_ax.get_xlim()
             xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
             xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
-            min_y, max_y = np.nanmin(self.spectrum[xmin_idx:xmax_idx]), np.nanmax(
-                self.spectrum[xmin_idx:xmax_idx]
-            )
-            buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
-            self.spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
+
+            # Check if the spectrum has any valid data in the displayed range
+            spectrum_slice = self.spectrum[xmin_idx:xmax_idx]
+            if not np.all(np.isnan(spectrum_slice)):
+                min_y, max_y = np.nanmin(spectrum_slice), np.nanmax(spectrum_slice)
+                buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
+                self.spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
             self.spectral_canvas.draw()
 
     def reset_x_axis_span(self):
@@ -4513,11 +4872,13 @@ class SpectralCubeAnalysisTool:
         xmin, xmax = self.spectral_ax.get_xlim()
         xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
         xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
-        min_y, max_y = np.nanmin(self.spectrum[xmin_idx:xmax_idx]), np.nanmax(
-            self.spectrum[xmin_idx:xmax_idx]
-        )
-        buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
-        self.spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
+
+        # Check if the spectrum has any valid data in the displayed range
+        spectrum_slice = self.spectrum[xmin_idx:xmax_idx]
+        if not np.all(np.isnan(spectrum_slice)):
+            min_y, max_y = np.nanmin(spectrum_slice), np.nanmax(spectrum_slice)
+            buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
+            self.spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
         self.spectral_canvas.draw()
 
     def update_x_axis_span(self, event):
@@ -5433,6 +5794,7 @@ class spectral_window(SpectralCubeAnalysisTool):
         # Initialize library spectra tracking for this window
         self.library_spectra_data = {}
         self.library_spectra_controls_frame = None
+        self.offset_correction_applied = False
 
         if pc_index is not None:
             if d is not None:
@@ -5443,6 +5805,10 @@ class spectral_window(SpectralCubeAnalysisTool):
             else:
                 self.spectrum = self.polygon_spectra[pc_index]
             self.spectrum_label = self.polygons_table_data[pc_index][0]
+
+        # Store the original spectrum for correction toggle
+        self.original_spectrum = self.spectrum.copy()
+
         self.spectral_window = tk.Toplevel(self.root)
         self.spectral_window.title("Spectral Plot")
 
@@ -5464,11 +5830,13 @@ class spectral_window(SpectralCubeAnalysisTool):
         xmin, xmax = self.spectral_ax.get_xlim()
         xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
         xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
-        min_y, max_y = np.nanmin(self.spectrum[xmin_idx:xmax_idx]), np.nanmax(
-            self.spectrum[xmin_idx:xmax_idx]
-        )
-        buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
-        self.spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
+
+        # Check if the spectrum has any valid data in the displayed range
+        spectrum_slice = self.spectrum[xmin_idx:xmax_idx]
+        if not np.all(np.isnan(spectrum_slice)):
+            min_y, max_y = np.nanmin(spectrum_slice), np.nanmax(spectrum_slice)
+            buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
+            self.spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
 
         self.spectral_canvas = FigureCanvasTkAgg(
             spectral_figure, master=self.spectral_window
@@ -5523,6 +5891,14 @@ class spectral_window(SpectralCubeAnalysisTool):
             command=self.toggle_ignore_bad_bands,
         )
         self.ignore_bad_bands_button.pack(side=tk.TOP)
+
+        # add a button to correct 1µm offset
+        self.correct_offset_button = tk.Button(
+            ui_frame,
+            text="Correct 1µm Offset (Off)",
+            command=self.toggle_1um_offset_correction,
+        )
+        self.correct_offset_button.pack(side=tk.TOP)
 
         # USGS LIBRAY SPECTRA
         # add a drop down menu to plot library spectra, contents of the drop down menu are the library spectra located in the library_spectra folder
