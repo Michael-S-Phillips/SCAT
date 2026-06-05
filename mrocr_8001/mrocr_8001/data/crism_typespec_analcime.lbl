@@ -1,4 +1,4 @@
-PDS_VERSION_ID                 = PDS3
+ PDS_VERSION_ID                 = PDS3
 LABEL_REVISION_NOTE            = "2014-04-16, J. Ward (GEO);"
 
 RECORD_TYPE                    = FIXED_LENGTH               

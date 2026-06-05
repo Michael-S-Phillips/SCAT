@@ -17,9 +17,15 @@ from scipy import interpolate
 import pandas as pd
 import glob
 import re
+import warnings
 import matplotlib.colors as mcolors
 from joblib import Parallel, delayed
 import os
+
+# Import the new plotting system
+from plot_manager import get_plot_manager
+from spectral_plot_window import SpectralPlotWindow, SpectrumData
+from drag_drop_manager import get_drag_drop_manager
 
 # try:
 from hypyrameter.paramCalculator import cubeParamCalculator
@@ -32,6 +38,181 @@ from hypyrameter.utils import (
 
 # except:
 #     print("Unable to load HyPyRameter, visit https://github.com/Michael-S-Phillips/HyPyRameter for more information.")
+
+
+def _nanmean_over_mask(data, mask, fill_values=(), valid_range=None):
+    """Per-band NaN-aware mean over pixels selected by a 2D mask.
+
+    Replacement for spectral.calc_stats(...).mean, whose underlying
+    np.average propagates NaN — a single NaN pixel poisons the whole
+    band's mean. This uses np.nanmean so an ROI containing some bad
+    pixels still produces a usable spectrum.
+
+    Pre-filter (per pixel, per band, applied before averaging):
+      - NaN is always treated as missing (np.nanmean).
+      - Any value equal to one of `fill_values` (e.g. CRISM's 65535
+        data-ignore sentinel from the ENVI header) is treated as NaN.
+      - Values outside `valid_range = (lo, hi)` (either bound may be
+        None) are treated as NaN.
+
+    Filtering per-pixel — rather than computing the mean and then
+    NaN-ing out-of-range *band means* — is what lets an ROI that
+    straddles a no-data area still produce a real spectrum: the
+    sentinel pixels are excluded one band at a time, so any band
+    that has at least one valid pixel under the ROI gets a real
+    mean.
+
+    Returns a length-`bands` array. Bands where every selected pixel
+    is NaN/sentinel/out-of-range return NaN (warning suppressed).
+    """
+    mask_bool = np.asarray(mask).astype(bool)
+    # SPy's ImageArray (from .load()) overrides __getitem__ in a way that
+    # mishandles 2D boolean fancy indexing — it iterates the mask rows and
+    # raises "too many indices for array". View as a plain ndarray first.
+    arr = np.asarray(data)
+    if arr.ndim == 3:
+        # SPy's load() returns (rows, cols, bands).
+        pixels = arr[mask_bool]
+        n_bands = arr.shape[-1]
+    elif arr.ndim == 2:
+        pixels = arr[mask_bool]
+        n_bands = 1
+    else:
+        raise ValueError(f"Unsupported data ndim={arr.ndim}")
+
+    if pixels.size == 0:
+        return np.full(n_bands, np.nan, dtype=np.float64)
+
+    pixels = pixels.astype(np.float64, copy=True)
+    for fv in fill_values:
+        # NaN sentinels need np.isnan; finite sentinels use ==.
+        if fv is None:
+            continue
+        if isinstance(fv, float) and np.isnan(fv):
+            continue  # already handled by nanmean
+        pixels[pixels == fv] = np.nan
+    if valid_range is not None:
+        lo, hi = valid_range
+        if lo is not None:
+            pixels[pixels < lo] = np.nan
+        if hi is not None:
+            pixels[pixels > hi] = np.nan
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        return np.nanmean(pixels, axis=0)
+
+
+def _data_ignore_value(spy_image):
+    """Pull `data ignore value` from an ENVI header if present, as float.
+
+    Returns None if the image isn't an SPy SpyFile-like object or the
+    header doesn't set one. CRISM tiles set this to 65535.
+    """
+    md = getattr(spy_image, 'metadata', None)
+    if not md:
+        return None
+    raw = md.get('data ignore value')
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+# Patterns describing how to derive the geometry/backplane file path
+# from a CRISM source filename. Each entry is (regex, replacement); the
+# first match wins. Order matters — `mrral` (mosaic tile albedo) must
+# come before generic per-strip patterns because the per-strip regex
+# would not match `mrral` anyway, but listing tile patterns first
+# makes the intent explicit.
+_GEOMETRY_NAME_PATTERNS = (
+    # Map-projected mosaic tile reflectance products → DDR companion.
+    # e.g. t0886_mrral_05s058_0327_4 → t0886_mrrde_05s058_0327_4
+    (re.compile(r'_mrr(al|if|ir|sr|su|ra)_', re.IGNORECASE), '_mrrde_'),
+    # Per-strip MTRDR products → input-geometry companion.
+    # e.g. frt00003e12_07_if165j_mtr3 → frt00003e12_07_in165j_mtr3
+    (re.compile(r'_(if|sr|su)(\d{3}[a-z])', re.IGNORECASE), r'_in\2'),
+)
+
+
+def _resolve_geometry_file(source_filename):
+    """Map a CRISM source `.hdr`/`.img` path to its geometry companion.
+
+    Returns the absolute path of the geometry `.img` file if a known
+    naming convention matches AND the file exists on disk; otherwise
+    None. The choice of companion depends on product type:
+
+      - `*_mrr??_*` (map-projected mosaic tiles) → `*_mrrde_*`
+      - `*_if|sr|suNNNx*`  (per-strip MTRDR)    → `*_inNNNx*`
+
+    Returning None is the unambiguous "no geometry available" signal —
+    callers should disable column-lock for this image rather than
+    silently falling back to reading the source as a fake backplane.
+    """
+    directory = os.path.dirname(source_filename)
+    filename = os.path.basename(source_filename)
+    stem, _ = os.path.splitext(filename)
+
+    for pattern, replacement in _GEOMETRY_NAME_PATTERNS:
+        new_stem, n_subs = pattern.subn(replacement, stem)
+        if n_subs == 0 or new_stem == stem:
+            continue
+        candidate = os.path.join(directory, new_stem + '.img')
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+# Band descriptions we look up in CRISM geometry files. The same logical
+# layer is named differently across product generations (per-strip _in
+# files vs tile _mrrde files), so we accept any of several aliases and
+# match case-insensitively against rasterio's description strings.
+#
+# Note on strip identification for tiles: `target_id` is the actual
+# unique strip identifier (one CRISM observation ID per source strip),
+# *not* `segment_id`. Segment ID is a within-target counter that takes
+# only ~4 values across an entire mosaic, so many distinct strips
+# share the same Segment ID. Use Target ID for primary gating and
+# Segment ID only as a secondary gate within multi-segment targets.
+_BAND_ALIASES = {
+    'ir_sample': (
+        'ir (l-detector) sample',
+        'ir sample',
+        'l-detector sample',
+    ),
+    'target_id': (
+        'target id',
+    ),
+    'segment_id': (
+        'segment id (counter)',
+        'segment id',
+        'segment',
+    ),
+}
+
+
+def _find_band_index(rio_image, kind):
+    """Return 1-indexed rasterio band index for a logical layer.
+
+    `kind` is a key into `_BAND_ALIASES`. Matches are case-insensitive
+    and substring-tolerant (rasterio descriptions vary in punctuation
+    and parenthetical detail across product versions). Returns None if
+    no band description matches — caller must handle absence
+    explicitly (e.g. tile DDR has Segment ID; per-strip _in files
+    may not).
+    """
+    aliases = _BAND_ALIASES.get(kind, ())
+    descs = rio_image.descriptions or ()
+    for idx, desc in enumerate(descs, start=1):
+        if not desc:
+            continue
+        d = desc.strip().lower()
+        for alias in aliases:
+            if alias in d:
+                return idx
+    return None
 
 
 class SpectralCubeAnalysisTool:
@@ -117,6 +298,27 @@ class SpectralCubeAnalysisTool:
         self.ignore_ratio_bad_bands_flag = False
         self.draw_poly_motion_flag = False
         self.lock_column = False
+        # Geometry/backplane cache for column-lock. Keyed by source
+        # filename. Value is a dict (when geometry was resolved and
+        # loaded), or None (cached "no geometry available" sentinel
+        # so we don't re-attempt resolution on every paste). Dict
+        # entry: {'ir_sample': np.ndarray, 'segment_id': np.ndarray
+        # | None, 'nodata': float | None, 'path': str}.
+        self._geometry_cache = {}
+        # Source files for which we've already shown the user the
+        # "no geometry, column-lock disabled" warning — keep that
+        # one-shot per cube so we don't spam dialogs.
+        self._geometry_warning_shown = set()
+        # Strip-footprint overlay state. The overlay outlines the
+        # source CRISM strip (target_id + segment_id) on both canvases
+        # while column-lock is on, so users can see the y-range and
+        # x-range within which their next paste can actually lock.
+        # Artist refs are kept so we can remove them on toggle/redraw.
+        self._strip_footprint_artists = []
+        # Cache of contour polygons keyed by (target_id, segment_id).
+        # Recomputing the boundary of a 1.6M-pixel mask isn't cheap
+        # enough to do on every redraw.
+        self._strip_footprint_cache = {}
         self.points = []
         self.current_polygon = []
         self.denom_polygon = []
@@ -167,6 +369,10 @@ class SpectralCubeAnalysisTool:
         self.mica_spectra_names = glob.glob(self.mica_spectra_path + "*.tab")
 
         self.pc = None
+
+        # Initialize the new plotting system
+        self.plot_manager = get_plot_manager()
+        self.drag_drop_manager = get_drag_drop_manager(self.root)
 
     def create_main_ui(self):
         """
@@ -487,6 +693,13 @@ class SpectralCubeAnalysisTool:
             label="Plot Right Frame Histogram", command=self.plot_right_histograms
         )
 
+        # Plot windows menu
+        plot_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Plot Windows", menu=plot_menu)
+        plot_menu.add_command(
+            label="New Spectral Plot Window", command=self.create_new_spectral_plot_window
+        )
+
         processing_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Processing", menu=processing_menu)
         processing_menu.add_command(
@@ -648,6 +861,11 @@ class SpectralCubeAnalysisTool:
             file_ext = file_path.split('.')[-1]
             print(file_ext, file_path)
         if file_path:
+            # Loading a new cube invalidates anything keyed on the
+            # previous source: column-lock geometry, the strip
+            # footprint contour cache, and the live overlay artists.
+            self._strip_footprint_cache = {}
+            self._clear_strip_footprint_overlay()
             if file_ext == 'hdr' or file_ext == 'HDR':
                 self.left_data = spectral.io.envi.open(file_path)
                 self.ld = self.left_data.load()
@@ -1986,89 +2204,35 @@ class SpectralCubeAnalysisTool:
                                 denom_y_centroid - y_centroid,
                             )
                             if self.lock_column:
-                                print('column lock on')
-
-                                # Build path to MRRDE geometry file
-                                # Only replace product code in filename, not directory
-                                source_file = self.left_data.filename
-                                directory = os.path.dirname(source_file)
-                                filename = os.path.basename(source_file)
-                                geometry_filename = re.sub(r'_(if|su|sr)(\d{3}[a-z])', r'_in\2', filename)
-                                geometry_filename = geometry_filename.replace(".hdr", ".img")
-                                column_file = os.path.join(directory, geometry_filename)
-
-                                if not os.path.exists(column_file):
-                                    messagebox.showwarning("warning", f"no associated mrrde file. looking for: {column_file}")
-                                    print('using pixel-space column-lock')
-                                    dx = 0
+                                print('=== COLUMN LOCK DEBUG ===')
+                                print(f'template polygon centroid: ({x_centroid:.1f}, {y_centroid:.1f})')
+                                print(f'right-click at: ({denom_x_centroid:.1f}, {denom_y_centroid:.1f})')
+                                print(f'initial dx={dx:.1f}, dy={dy:.1f}')
+                                # Use the geometry-aware matcher: it picks
+                                # the proper backplane (mrrde for tiles,
+                                # _in for per-strip), looks up bands by
+                                # description, and (when Segment ID is
+                                # available) restricts the destination-row
+                                # search to the same source strip.
+                                locked_dx = self._compute_column_lock_dx(
+                                    template_polygon, denom_y_centroid
+                                )
+                                if locked_dx is not None:
+                                    dx = locked_dx
                                 else:
-                                    try:
-                                        # Get Band 6 data (IR Sample = detector column for IR)
-                                        # MRRDE bands: 4=VNIR Sample, 5=VNIR Line, 6=IR Sample, 7=IR Line
-                                        print('loading mrrde')
-                                        metadata_image = rio.open(column_file)
-                                        column_data = metadata_image.read(6)  # IR Sample (column)
-
-                                        # Get the original column value (note: array is [y, x] so use [point[1], point[0]])
-                                        original_column_value = np.mean([column_data[int(point[1]), int(point[0])] for point in template_polygon])
-                                        print(f'original column value: {original_column_value}')
-                                        # Get the column value at the destination
-                                        dest_col_idx_x = int(denom_x_centroid)
-                                        dest_col_idx_y = int(denom_y_centroid)
-                                        
-                                        # Make sure indices are within bounds
-                                        if (0 <= dest_col_idx_y < column_data.shape[0] and
-                                            0 <= dest_col_idx_x < column_data.shape[1]):
-                                            # Search horizontally at the destination row to find
-                                            # the x position where column value matches the source
-                                            row_column_values = column_data[dest_col_idx_y, :]
-
-                                            # Find the x position with matching column value
-                                            # Search within a reasonable range around the click point
-                                            search_radius = 200  # pixels
-                                            best_x = None
-                                            min_diff = float('inf')
-
-                                            start_x = max(0, dest_col_idx_x - search_radius)
-                                            end_x = min(column_data.shape[1], dest_col_idx_x + search_radius)
-
-                                            for test_x in range(start_x, end_x):
-                                                col_val = row_column_values[test_x]
-                                                if np.isnan(col_val):
-                                                    continue
-                                                diff = abs(col_val - original_column_value)
-                                                if diff < min_diff:
-                                                    min_diff = diff
-                                                    best_x = test_x
-
-                                            if best_x is not None:
-                                                # Adjust dx to shift to in-column location
-                                                # dx already contains (click_x - template_center_x)
-                                                # We add (best_x - click_x) to get (best_x - template_center_x)
-                                                column_adjustment = best_x - dest_col_idx_x
-                                                dx += column_adjustment
-                                                print(f'destination column value at click: {row_column_values[dest_col_idx_x]:.1f}')
-                                                print(f'found matching column at x={best_x}, column value={row_column_values[best_x]:.1f}')
-                                                print(f'column adjustment: {column_adjustment}, total dx: {dx}')
-                                            else:
-                                                dx = 0
-                                                print('could not find matching column value')
-                                        else:
-                                            # If destination is out of bounds, use default dx=0
-                                            dx = 0
-                                            messagebox.showwarning("Warning", "Destination is out of image bounds, using default horizontal offset.")
-                                            
-                                        # Clean up
-                                        metadata_image = None
-                                        
-                                    except Exception as e:
-                                        messagebox.showerror("Error", f"Error processing metadata: {str(e)}")
-                                        dx = 0  # Use default in case of error
-                            print(dx)
+                                    # Failure semantics preserved: dx=0
+                                    # leaves the polygon at the source x
+                                    # rather than jumping to an arbitrary
+                                    # click position.
+                                    dx = 0
+                            print(f'final dx={dx:.1f}, dy={dy:.1f}')
                             self.denom_polygon = [
                                 (point[0] + dx, point[1] + dy)
                                 for point in template_polygon
                             ]
+                            denom_cx, denom_cy = np.nanmean(self.denom_polygon, axis=0)
+                            print(f'denom polygon centroid: ({denom_cx:.1f}, {denom_cy:.1f})')
+                            print('=== END COLUMN LOCK DEBUG ===')
 
                             self.clear_axes()
                             self.update_left_display()
@@ -2623,6 +2787,8 @@ class SpectralCubeAnalysisTool:
                 self.polygon_table.set(item, column, "[ ]")
                 self.template_index = []
                 self.template_index_cache = []
+            # Source strip changed → refresh the footprint outline.
+            self._update_strip_footprint_overlay()
 
     def clear_polygons_table(self):
         self.polygons_table_data = []
@@ -2760,6 +2926,371 @@ class SpectralCubeAnalysisTool:
         else:
             self.lock_column = True
             self.lock_column_button.config(text="Lock Column On", relief="raised")
+        # Show/hide the source-strip footprint outline.
+        self._update_strip_footprint_overlay()
+
+    def _get_column_lock_geometry(self):
+        """Return cached IR Sample / Segment ID arrays for the current cube.
+
+        On first call for a given source file, resolves the proper
+        geometry companion (mrrde for tiles, _in for per-strip
+        products), opens it with rasterio, and caches the IR Sample
+        and (when present) Segment ID bands looked up *by description*
+        rather than hardcoded index — band 6 = IR Sample is only true
+        for per-strip _in files; tile mrrde files put IR Sample at
+        band 5.
+
+        Returns a dict with keys `ir_sample`, `segment_id` (may be
+        None on per-strip products that don't carry it), `nodata`,
+        and `path`. Returns None if no geometry file is available —
+        the caller must then disable column-lock for this cube and
+        tell the user, instead of falling back to reading the source
+        as a fake backplane (which is what produced the random-paste
+        bug on tile data).
+
+        Negative results (no geometry file, unreadable file, missing
+        IR Sample band) are cached as None so the regex/file probe
+        doesn't re-run on every paste.
+        """
+        source_file = self.left_data.filename
+        if source_file in self._geometry_cache:
+            return self._geometry_cache[source_file]
+
+        geom_path = _resolve_geometry_file(source_file)
+        if geom_path is None:
+            self._geometry_cache[source_file] = None
+            return None
+
+        try:
+            with rio.open(geom_path) as geom:
+                ir_idx = _find_band_index(geom, 'ir_sample')
+                tgt_idx = _find_band_index(geom, 'target_id')
+                seg_idx = _find_band_index(geom, 'segment_id')
+                if ir_idx is None:
+                    print(
+                        f'column-lock: geometry file {geom_path} has no '
+                        f'IR Sample band; descriptions: {geom.descriptions}'
+                    )
+                    self._geometry_cache[source_file] = None
+                    return None
+                ir_sample = geom.read(ir_idx).astype(np.float64)
+                target_id = geom.read(tgt_idx).astype(np.float64) if tgt_idx else None
+                segment_id = geom.read(seg_idx).astype(np.float64) if seg_idx else None
+                nodata = geom.nodata
+        except Exception as e:
+            print(f'column-lock: failed to read geometry file {geom_path}: {e}')
+            self._geometry_cache[source_file] = None
+            return None
+
+        # Treat the file's nodata sentinel and NaN as missing across all
+        # arrays; downstream code can then rely on np.isnan() uniformly.
+        if nodata is not None:
+            ir_sample = np.where(ir_sample == nodata, np.nan, ir_sample)
+            if target_id is not None:
+                target_id = np.where(target_id == nodata, np.nan, target_id)
+            if segment_id is not None:
+                segment_id = np.where(segment_id == nodata, np.nan, segment_id)
+
+        entry = {
+            'ir_sample': ir_sample,
+            'target_id': target_id,
+            'segment_id': segment_id,
+            'nodata': nodata,
+            'path': geom_path,
+        }
+        self._geometry_cache[source_file] = entry
+        return entry
+
+    def _compute_column_lock_dx(self, template_polygon, click_y):
+        """Compute dx for a column-locked paste.
+
+        The template polygon defines a sensor column (mean IR Sample
+        under the polygon's filled mask) and, when the geometry file
+        carries them, a *source strip identity*:
+
+          - Target ID (band 1) — the unique CRISM observation ID;
+            this is the actual strip-identifier in mosaic tiles.
+          - Segment ID (band 2) — a within-target counter; only useful
+            as a secondary gate for multi-segment observations.
+
+        At the destination row given by `click_y`, the search is
+        gated to pixels that share the source's Target ID and (if
+        present) Segment ID, then picks the one with IR Sample
+        closest to the source mean.
+
+        Why both: an earlier version gated only on Segment ID and
+        still produced wrong-strip placements. Segment ID takes only
+        a handful of distinct values across a mosaic (e.g. {1,3,5,7}),
+        so many physically distinct strips share the same value.
+        Target ID is the strip-unique key.
+
+        Returns the dx (relative to the template's centroid x) that
+        places the polygon's centroid at the matched x. Returns None
+        when column-lock cannot be applied for this paste — most
+        commonly because the source strip simply doesn't reach the
+        destination row the user clicked. Hard failures (no geometry
+        file) raise a one-shot messagebox per source cube.
+        """
+        geom = self._get_column_lock_geometry()
+        if geom is None:
+            source_file = self.left_data.filename
+            if source_file not in self._geometry_warning_shown:
+                self._geometry_warning_shown.add(source_file)
+                messagebox.showwarning(
+                    "Column lock",
+                    "No CRISM geometry/backplane file found for "
+                    f"{os.path.basename(source_file)}.\n\n"
+                    "Column-lock cannot determine sensor columns "
+                    "without a backplane file (e.g. _mrrde_ for "
+                    "tiles, _in*_ for per-strip products) and will "
+                    "be skipped for this cube."
+                )
+            return None
+
+        ir_sample = geom['ir_sample']
+        target_id = geom['target_id']
+        segment_id = geom['segment_id']
+        nrows, ncols = ir_sample.shape
+
+        # Compute source identity over the polygon's filled footprint
+        # (more representative than just its vertices for large ROIs).
+        mask = np.zeros((nrows, ncols), dtype=np.uint8)
+        pts = np.array([[int(x), int(y)] for x, y in template_polygon])
+        cv2.fillPoly(mask, [pts], 1)
+        mask_bool = mask.astype(bool)
+
+        src_ir_vals = ir_sample[mask_bool]
+        src_ir_vals = src_ir_vals[~np.isnan(src_ir_vals)]
+        if src_ir_vals.size == 0:
+            print('column-lock: template polygon has no valid IR Sample values')
+            return None
+        src_ir_mean = float(np.mean(src_ir_vals))
+
+        def _mode_under_mask(arr):
+            if arr is None:
+                return None
+            vals = arr[mask_bool]
+            vals = vals[~np.isnan(vals)]
+            if vals.size == 0:
+                return None
+            # Mode, not mean: averaging strip identifiers makes no
+            # physical sense; a polygon straddling two strips picks
+            # whichever covers more of the polygon.
+            uniq, counts = np.unique(vals.astype(np.int64), return_counts=True)
+            return int(uniq[int(np.argmax(counts))])
+
+        src_target = _mode_under_mask(target_id)
+        src_seg = _mode_under_mask(segment_id)
+
+        dest_y = int(click_y)
+        if not (0 <= dest_y < nrows):
+            print(f'column-lock: destination row y={dest_y} out of bounds (0..{nrows-1})')
+            return None
+
+        row_ir = ir_sample[dest_y, :]
+        valid = ~np.isnan(row_ir)
+        if src_target is not None:
+            valid &= (target_id[dest_y, :] == src_target)
+        if src_seg is not None and segment_id is not None:
+            valid &= (segment_id[dest_y, :] == src_seg)
+        valid_xs = np.where(valid)[0]
+
+        if valid_xs.size == 0:
+            # The source strip simply doesn't reach this destination
+            # row. This is the most common reason column-lock can't
+            # apply: users click somewhere along-track that's outside
+            # the source observation's footprint within the mosaic.
+            if src_target is not None:
+                print(
+                    f'column-lock: source strip (target {src_target}'
+                    + (f', segment {src_seg}' if src_seg is not None else '')
+                    + f') does not reach destination row y={dest_y}; '
+                    'cannot lock — falling back to no horizontal shift'
+                )
+            else:
+                print(f'column-lock: no valid IR Sample pixels in destination row y={dest_y}')
+            return None
+
+        diffs = np.abs(row_ir[valid_xs] - src_ir_mean)
+        best_x = int(valid_xs[int(np.argmin(diffs))])
+
+        # Source polygon's centroid x (independent of the click).
+        src_x = float(np.nanmean([pt[0] for pt in template_polygon]))
+
+        print(
+            f'column-lock: src target={src_target}, segment={src_seg}, '
+            f'IR Sample={src_ir_mean:.2f} → '
+            f'dest x={best_x}, IR Sample={row_ir[best_x]:.2f}, '
+            f'dx={best_x - src_x:.1f}'
+        )
+        return best_x - src_x
+
+    def _source_strip_identity(self):
+        """Return (target_id, segment_id) for the current template polygon.
+
+        Uses the *mode* of the geometry bands under the template's
+        filled footprint, so a polygon that straddles a strip boundary
+        picks whichever strip covers more of it. Returns (None, None)
+        if column-lock can't be applied at all (no template, no
+        geometry, no IR Sample band, etc.) — caller treats that as
+        "nothing to highlight".
+        """
+        # `template_index` can be None, [], or a non-negative int
+        # (existing convention in this codebase). Treat anything that
+        # isn't a usable integer index as "no template selected".
+        tpl = getattr(self, 'template_index', None)
+        if tpl is None or isinstance(tpl, (list, tuple)):
+            return (None, None)
+        try:
+            tpl_idx = int(tpl)
+        except (TypeError, ValueError):
+            return (None, None)
+        if tpl_idx < 0 or tpl_idx >= len(self.all_polygons):
+            return (None, None)
+
+        geom = self._get_column_lock_geometry()
+        if geom is None:
+            return (None, None)
+
+        target_id = geom['target_id']
+        segment_id = geom['segment_id']
+        if target_id is None and segment_id is None:
+            return (None, None)
+
+        nrows, ncols = geom['ir_sample'].shape
+        mask = np.zeros((nrows, ncols), dtype=np.uint8)
+        pts = np.array([[int(x), int(y)] for x, y in self.all_polygons[tpl_idx]])
+        cv2.fillPoly(mask, [pts], 1)
+        mb = mask.astype(bool)
+
+        def _mode(arr):
+            if arr is None:
+                return None
+            v = arr[mb]
+            v = v[~np.isnan(v)]
+            if v.size == 0:
+                return None
+            u, c = np.unique(v.astype(np.int64), return_counts=True)
+            return int(u[int(np.argmax(c))])
+
+        return (_mode(target_id), _mode(segment_id))
+
+    def _compute_strip_footprint_contours(self, src_target, src_segment):
+        """Return list of polygon-vertex arrays outlining the source strip.
+
+        `src_target` and `src_segment` may each be None if the
+        corresponding band wasn't present in the geometry file. The
+        mask is the AND of whichever identifiers are available; if
+        both are None, returns an empty list (no useful outline).
+        Cached by (target, segment) to avoid recomputing every redraw.
+        """
+        key = (src_target, src_segment)
+        if key in self._strip_footprint_cache:
+            return self._strip_footprint_cache[key]
+
+        geom = self._get_column_lock_geometry()
+        if geom is None:
+            return []
+
+        target_id = geom['target_id']
+        segment_id = geom['segment_id']
+        if src_target is None and src_segment is None:
+            return []
+
+        # Build the strip mask. A pixel belongs to the source strip
+        # iff every available identifier matches.
+        if target_id is not None and src_target is not None:
+            mask = (target_id == src_target)
+            if segment_id is not None and src_segment is not None:
+                mask &= (segment_id == src_segment)
+        elif segment_id is not None and src_segment is not None:
+            mask = (segment_id == src_segment)
+        else:
+            return []
+
+        mask_u8 = mask.astype(np.uint8)
+        # CHAIN_APPROX_TC89_L1 collapses straight-line vertices, which
+        # keeps the artist count low without losing visible detail at
+        # the typical zoom levels users work at.
+        contours, _ = cv2.findContours(
+            mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_L1
+        )
+        # cv2 returns Nx1x2 int32 arrays of (x, y); flatten to Nx2.
+        polys = [c.reshape(-1, 2) for c in contours if len(c) >= 3]
+        self._strip_footprint_cache[key] = polys
+        return polys
+
+    def _clear_strip_footprint_overlay(self):
+        """Remove any drawn footprint outlines from both canvases."""
+        for artist in self._strip_footprint_artists:
+            try:
+                artist.remove()
+            except (ValueError, NotImplementedError):
+                # Artist may already be gone if its axes were cleared.
+                pass
+        self._strip_footprint_artists = []
+
+    def _update_strip_footprint_overlay(self, redraw=True):
+        """Refresh the source-strip outline on left and right canvases.
+
+        Drawn only when column-lock is on AND a template polygon is
+        selected AND the cube has usable geometry. Otherwise removes
+        any previous outline. Idempotent — safe to call from any
+        place that might change the overlay's visibility (toggle,
+        template change, redraw, cube load).
+        """
+        self._clear_strip_footprint_overlay()
+        if not getattr(self, 'lock_column', False):
+            if redraw:
+                self.left_canvas.draw_idle()
+                self.right_canvas.draw_idle()
+            return
+        if not hasattr(self, 'left_data'):
+            return
+
+        src_target, src_segment = self._source_strip_identity()
+        if src_target is None and src_segment is None:
+            if redraw:
+                self.left_canvas.draw_idle()
+                self.right_canvas.draw_idle()
+            return
+
+        polys = self._compute_strip_footprint_contours(src_target, src_segment)
+        if not polys:
+            if redraw:
+                self.left_canvas.draw_idle()
+                self.right_canvas.draw_idle()
+            return
+
+        # Yellow outline contrasts with both the polygon ink (black/
+        # cyan) and CRISM imagery; double-line (background black,
+        # foreground yellow) keeps it readable on light terrain too.
+        for ax in (self.left_ax, self.right_ax):
+            for verts in polys:
+                # Background stroke (slightly wider, dark) for legibility.
+                bg = Polygon(
+                    verts,
+                    closed=True,
+                    fill=False,
+                    edgecolor='black',
+                    linewidth=2.4,
+                    zorder=4,
+                )
+                fg = Polygon(
+                    verts,
+                    closed=True,
+                    fill=False,
+                    edgecolor='yellow',
+                    linewidth=1.2,
+                    zorder=5,
+                )
+                ax.add_patch(bg)
+                ax.add_patch(fg)
+                self._strip_footprint_artists.extend([bg, fg])
+
+        if redraw:
+            self.left_canvas.draw_idle()
+            self.right_canvas.draw_idle()
 
     def draw_all_polygons(self):
         self.polygons_on_flag = True
@@ -2807,6 +3338,10 @@ class SpectralCubeAnalysisTool:
                         polygon, closed=True, facecolor=polygon_color, edgecolor="k"
                     )
                 )
+        # Re-attach the source-strip footprint outline so it survives
+        # the polygon redraw. Use redraw=False to fold it into the
+        # single canvas.draw() below instead of triggering another.
+        self._update_strip_footprint_overlay(redraw=False)
         self.left_canvas.draw()
         self.right_canvas.draw()
         self.update_polygons_table()
@@ -2888,17 +3423,23 @@ class SpectralCubeAnalysisTool:
             polygon_points_int = [(int(x), int(y)) for x, y in polygon]
             cv2.fillPoly(mask, [np.array(polygon_points_int)], 1)
 
-            # Function to calculate statistics for a single mask
-            def calculate_stats(data, mask, allow_nan, spec_data=True):
-                gstats = spectral.calc_stats(data, mask=mask, allow_nan=allow_nan)
-                mean_spectrum = gstats.mean
-                if spec_data:
-                    mean_spectrum = np.where(mean_spectrum < 0, np.nan, mean_spectrum)
-                    mean_spectrum = np.where(mean_spectrum > 1.5, np.nan, mean_spectrum)
-                return mean_spectrum
+            # ROI mean. Filter sentinel/out-of-range *per pixel* before
+            # averaging — otherwise a CRISM tile's 65535 fill values
+            # (data-ignore sentinel) inside a partial-coverage ROI drag
+            # the band means above 1.5 and the post-mean filter wipes
+            # the whole spectrum to NaN.
+            left_fill = _data_ignore_value(self.left_data)
+            right_fill = _data_ignore_value(self.right_data) if hasattr(self, 'right_data') else None
+            spec_fills = tuple(v for v in (left_fill, 65535.0) if v is not None)
+            param_fills = tuple(v for v in (right_fill, 65535.0) if v is not None)
 
-            mean_spec = calculate_stats(self.ld, mask, True)
-            mean_param = calculate_stats(self.rd, mask, True, spec_data = False)
+            def calculate_stats(data, mask, fills, valid_range):
+                return _nanmean_over_mask(
+                    data, mask, fill_values=fills, valid_range=valid_range
+                )
+
+            mean_spec = calculate_stats(self.ld, mask, spec_fills, (0.0, 1.5))
+            mean_param = calculate_stats(self.rd, mask, param_fills, None)
 
             # Calculate statistics for the left data
             if polygon_index != -1:
@@ -2932,25 +3473,32 @@ class SpectralCubeAnalysisTool:
                     polygon_points_int = [(int(x), int(y)) for x, y in polygon]
                     cv2.fillPoly(masks[idx], [np.array(polygon_points_int)], 1)
 
-                # Function to calculate statistics for a single mask
-                def calculate_stats(data, mask, allow_nan, spec_data=True):
-                    gstats = spectral.calc_stats(data, mask=mask, allow_nan=allow_nan)
-                    mean_spectrum = gstats.mean
-                    if spec_data:
-                        mean_spectrum = np.where(mean_spectrum < 0, np.nan, mean_spectrum)
-                        mean_spectrum = np.where(mean_spectrum > 1.5, np.nan, mean_spectrum)
-                    return mean_spectrum
+                # See note on the single-polygon variant: pre-filter
+                # sentinel/out-of-range pixels per band before averaging
+                # so partial-coverage ROIs over CRISM tile no-data
+                # regions still produce a real spectrum.
+                left_fill = _data_ignore_value(self.left_data)
+                right_fill = _data_ignore_value(self.right_data) if hasattr(self, 'right_data') else None
+                spec_fills = tuple(v for v in (left_fill, 65535.0) if v is not None)
+                param_fills = tuple(v for v in (right_fill, 65535.0) if v is not None)
+
+                def calculate_stats(data, mask, fills, valid_range):
+                    return _nanmean_over_mask(
+                        data, mask, fill_values=fills, valid_range=valid_range
+                    )
 
                 # Calculate statistics in parallel
                 results = Parallel(n_jobs=-1)(
-                    delayed(calculate_stats)(self.ld, mask, True) for mask in masks
+                    delayed(calculate_stats)(self.ld, mask, spec_fills, (0.0, 1.5))
+                    for mask in masks
                 )
                 print(len(results))
                 self.polygon_spectra.extend(results)
 
                 # Calculate parameters (assuming self.right_data is defined)
                 results_params = Parallel(n_jobs=-1)(
-                    delayed(calculate_stats)(self.rd, mask, True, spec_data = False) for mask in masks
+                    delayed(calculate_stats)(self.rd, mask, param_fills, None)
+                    for mask in masks
                 )
                 self.polygon_params.extend(results_params)
 
@@ -3733,7 +4281,19 @@ class SpectralCubeAnalysisTool:
             # Add span selector for x-axis
             self.create_polygons_x_axis_span_selector(self.left_wvl)
 
-    def update_polygons_spectral_plot(self):
+    def update_polygons_spectral_plot(self, use_unified: bool = True):
+        """
+        Update the ROI spectral plot.
+
+        Args:
+            use_unified: If True, use the unified plotting system (SpectralPlotWindow).
+                        If False, use the legacy separate window.
+        """
+        if use_unified and self.polygon_spectra:
+            self._add_roi_spectra_to_active_plot()
+            return
+
+        # Legacy behavior below
         if (
             self.polygons_spectral_window is None
             or not self.polygons_spectral_window.winfo_exists()
@@ -4339,9 +4899,73 @@ class SpectralCubeAnalysisTool:
     # ----------------------------------------------------------------
     # points
     # ----------------------------------------------------------------
+    def create_new_spectral_plot_window(self):
+        """Create a new empty spectral plot window (menu action)."""
+        plot_window = self._create_spectral_plot_window()
+        plot_window.focus()
+        return plot_window
+
+    def _create_spectral_plot_window(self, title: str = "Spectral Plot") -> SpectralPlotWindow:
+        """
+        Create and register a new SpectralPlotWindow.
+
+        Returns:
+            The created SpectralPlotWindow instance
+        """
+        def on_close(plot):
+            self.plot_manager.unregister_plot(plot.plot_id)
+
+        def on_focus(plot):
+            self.plot_manager.set_active_plot(plot.plot_id)
+
+        plot_window = SpectralPlotWindow(
+            root=self.root,
+            title=title,
+            on_close_callback=on_close,
+            on_focus_callback=on_focus,
+            # Use a provider, not a snapshot: select_bad_bands /
+            # reset_bad_bands / on_bad_band_change rebind self.bad_bands
+            # to a fresh list, which would leave a snapshot stale and
+            # the toggle silently inert.
+            bad_bands_provider=lambda: self.bad_bands,
+            library_spectra_folders=self.usgs_spectra_folders,
+            mica_spectra_names=self.mica_spectra_names,
+            usgs_spectra_path=self.usgs_spectra_path,
+            mica_spectra_path=self.mica_spectra_path,
+        )
+
+        plot_id = self.plot_manager.register_plot(plot_window)
+        plot_window.set_plot_id(plot_id)
+
+        return plot_window
+
     def create_spectral_plot(self):
-        sw = spectral_window
-        sw.create_spectral_plot(app)
+        """Create a new spectral plot window using the new system."""
+        # Create a new SpectralPlotWindow
+        plot_window = self._create_spectral_plot_window()
+
+        # Add the current spectrum to it
+        spectrum_data = SpectrumData(
+            wavelengths=np.array(self.left_wvl),
+            values=self.spectrum.copy(),
+            label=self.spectrum_label,
+        )
+        plot_window.add_spectrum(spectrum_data)
+
+        # Store reference for backwards compatibility with old code
+        self.spectral_window = plot_window.window
+        self.spectral_ax = plot_window._ax
+        self.spectral_canvas = plot_window._canvas
+        # Store the line for update_spectral_plot compatibility
+        if plot_window._spectrum_lines:
+            self.spectral_line = plot_window._spectrum_lines[0]
+
+        # Also keep reference to the plot window object
+        self._current_point_plot_window = plot_window
+
+        # Legacy: Initialize offset correction flag
+        self.offset_correction_applied = False
+        self.original_spectrum = self.spectrum.copy()
 
         # # Create a new window for the spectral plot
         # self.spectral_window = tk.Toplevel(self.root)
@@ -4834,37 +5458,84 @@ class SpectralCubeAnalysisTool:
         return spectrum
 
     def update_spectral_plot(self):
-        if self.spectral_window is None or not self.spectral_window.winfo_exists():
+        """
+        Update the spectral plot with the current spectrum.
+
+        Uses the new plotting system: sends spectrum to the active plot,
+        or creates a new plot if none exists.
+        """
+        # Clean up any closed windows first
+        self.plot_manager.cleanup_closed_windows()
+
+        # Store original spectrum for any correction toggles
+        self.original_spectrum = self.spectrum.copy()
+
+        # Check if we have an active plot
+        active_plot = self.plot_manager.get_active_plot()
+
+        if active_plot is None:
+            # No active plot - create a new one
             print("creating spectral plot")
             self.create_spectral_plot()
         else:
-            # Start from original spectrum and apply corrections
-            self.spectrum = self.original_spectrum.copy()
+            # Send spectrum to the active plot
+            spectrum_data = SpectrumData(
+                wavelengths=np.array(self.left_wvl),
+                values=self.spectrum.copy(),
+                label=self.spectrum_label,
+            )
 
-            # Apply 1µm offset correction if enabled
-            if self.offset_correction_applied:
-                self.spectrum = self.apply_1um_offset_correction(self.spectrum)
+            # Check accumulate mode - if enabled, add without clearing
+            # Otherwise, clear previous spectra (maintaining old behavior)
+            if not active_plot.is_accumulate_mode():
+                active_plot.clear_spectra(update_view=False)
+            active_plot.add_spectrum(spectrum_data)
 
-            # Apply bad bands masking if enabled
-            if self.ignore_bad_bands_flag:
-                self.spectrum = np.where(
-                    np.array(self.bad_bands) == 0, np.nan, self.spectrum
-                )
+            # Update backwards-compatibility references
+            self.spectral_window = active_plot.window
+            self.spectral_ax = active_plot._ax
+            self.spectral_canvas = active_plot._canvas
+            if active_plot._spectrum_lines:
+                self.spectral_line = active_plot._spectrum_lines[0]
+            self._current_point_plot_window = active_plot
 
-            self.spectral_line.set_ydata(self.spectrum)
-            self.spectral_line.set_label(self.spectrum_label)
-            self.spectral_ax.legend()
-            xmin, xmax = self.spectral_ax.get_xlim()
-            xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
-            xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
+    def _add_roi_spectra_to_active_plot(self) -> None:
+        """
+        Add ROI spectra to the active spectral plot window.
 
-            # Check if the spectrum has any valid data in the displayed range
-            spectrum_slice = self.spectrum[xmin_idx:xmax_idx]
-            if not np.all(np.isnan(spectrum_slice)):
-                min_y, max_y = np.nanmin(spectrum_slice), np.nanmax(spectrum_slice)
-                buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
-                self.spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
-            self.spectral_canvas.draw()
+        This provides a unified approach to plotting both point and ROI spectra
+        through the same system.
+        """
+        # Clean up any closed windows first
+        self.plot_manager.cleanup_closed_windows()
+
+        # Get or create active plot
+        active_plot = self.plot_manager.get_active_plot()
+        if active_plot is None:
+            active_plot = self._create_spectral_plot_window(title="ROI Spectral Plot")
+
+        # Check accumulate mode
+        if not active_plot.is_accumulate_mode():
+            active_plot.clear_spectra(update_view=False)
+
+        # Add each ROI spectrum
+        for i, (color, spectrum) in enumerate(zip(self.polygon_colors, self.polygon_spectra)):
+            # Get ROI name from table data if available
+            if i < len(self.polygons_table_data):
+                label = self.polygons_table_data[i][0]  # First column is ROI name
+            else:
+                label = f"ROI {i+1}"
+
+            spectrum_data = SpectrumData(
+                wavelengths=np.array(self.left_wvl),
+                values=np.array(spectrum).flatten(),
+                label=label,
+                color=color,
+                metadata={'source': 'roi', 'roi_index': i}
+            )
+            active_plot.add_spectrum(spectrum_data, update_view=False)
+
+        active_plot._update_view()
 
     def reset_x_axis_span(self):
         # Reset x-axis span to the default range
@@ -5790,11 +6461,15 @@ class spectral_window(SpectralCubeAnalysisTool):
         super().__init__(master)
 
     def create_spectral_plot(self, pc_index=None, d=None):
+        """
+        Create a spectral plot for a single ROI using the new plotting system.
+
+        Args:
+            pc_index: Polygon/ROI index to plot
+            d: If not None, plot ratio spectrum (divided by denominator)
+        """
         self.num_idx = pc_index
-        # Initialize library spectra tracking for this window
-        self.library_spectra_data = {}
-        self.library_spectra_controls_frame = None
-        self.offset_correction_applied = False
+        self.add_spectrum_flag = d is not None
 
         if pc_index is not None:
             if d is not None:
@@ -5802,168 +6477,41 @@ class spectral_window(SpectralCubeAnalysisTool):
                     self.polygon_spectra[pc_index]
                     / self.polygon_spectra[self.denominator_index]
                 )
+                label_suffix = " (ratio)"
             else:
                 self.spectrum = self.polygon_spectra[pc_index]
-            self.spectrum_label = self.polygons_table_data[pc_index][0]
+                label_suffix = ""
+            self.spectrum_label = str(self.polygons_table_data[pc_index][0]) + label_suffix
 
         # Store the original spectrum for correction toggle
         self.original_spectrum = self.spectrum.copy()
 
-        self.spectral_window = tk.Toplevel(self.root)
-        self.spectral_window.title("Spectral Plot")
+        # Use the new plotting system
+        self.plot_manager.cleanup_closed_windows()
+        active_plot = self.plot_manager.get_active_plot()
 
-        # Create a frame to hold UI elements with a fixed size
-        ui_frame = tk.Frame(self.spectral_window)
-        ui_frame.pack(side=tk.RIGHT, fill=tk.BOTH)
+        if active_plot is None:
+            # Create a new plot window
+            active_plot = self._create_spectral_plot_window(title="ROI Spectral Plot")
 
-        spectral_figure, self.spectral_ax = plt.subplots(figsize=(5, 3))
-        (self.spectral_line,) = self.spectral_ax.plot(
-            self.left_wvl, self.spectrum, label=self.spectrum_label
+        # Check accumulate mode
+        if not active_plot.is_accumulate_mode():
+            active_plot.clear_spectra(update_view=False)
+
+        # Add the spectrum
+        spectrum_data = SpectrumData(
+            wavelengths=np.array(self.left_wvl),
+            values=self.spectrum.copy(),
+            label=self.spectrum_label,
+            color=self.polygon_colors[pc_index] if pc_index < len(self.polygon_colors) else 'blue',
+            metadata={'source': 'roi', 'roi_index': pc_index, 'is_ratio': d is not None}
         )
-        self.spectral_ax.legend(
-            loc="best"
-        )  # 'loc' can be adjusted to specify the legend position
-        self.spectral_ax.set_xlabel("Wavelength")
-        self.spectral_ax.set_ylabel("Value")
-        self.spectral_ax.set_title("Spectral Plot")
+        active_plot.add_spectrum(spectrum_data)
 
-        xmin, xmax = self.spectral_ax.get_xlim()
-        xmin_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmin))
-        xmax_idx = np.argmin(np.abs(np.array(self.left_wvl) - xmax))
-
-        # Check if the spectrum has any valid data in the displayed range
-        spectrum_slice = self.spectrum[xmin_idx:xmax_idx]
-        if not np.all(np.isnan(spectrum_slice)):
-            min_y, max_y = np.nanmin(spectrum_slice), np.nanmax(spectrum_slice)
-            buffer = (max_y - min_y) * 0.1  # Add a buffer to y-limits
-            self.spectral_ax.set_ylim(min_y - buffer, max_y + buffer)
-
-        self.spectral_canvas = FigureCanvasTkAgg(
-            spectral_figure, master=self.spectral_window
-        )
-        self.spectral_canvas.get_tk_widget().pack(
-            side=tk.TOP, fill=tk.BOTH, expand=True
-        )
-
-        # add a button to save the spectrum
-        self.store_ratio_spectrum = tk.Button(
-            ui_frame, text="Add Spectrum to Table", command=self.add_spectrum_to_table
-        )
-        self.store_ratio_spectrum.pack(side=tk.TOP)
-
-        # add a button to turn the legend on or off
-        self.toggle_legend_button = tk.Button(
-            ui_frame, text="Legend (On)", command=self.toggle_spectral_plot_legend
-        )
-        self.toggle_legend_button.pack(side=tk.TOP)
-
-        # Add a button to reset x-axis span
-        self.reset_spectral_x_axis_button = tk.Button(
-            ui_frame, text="Reset X-Axis Span", command=self.reset_x_axis_span
-        )
-        self.reset_spectral_x_axis_button.pack(side=tk.TOP)
-
-        # Add built-in span options to a dropdown menu
-        span_options = [
-            "Full Span",
-            "410 - 1000 nm",
-            "410 - 2500 nm",
-            "1000 - 2600 nm",
-            "1200 - 2000 nm",
-            "1800 - 2500 nm",
-            "2000 - 2500 nm",
-            "2700 - 3900 nm",
-        ]
-        self.span_var = tk.StringVar()
-        self.span_var.set("Full Span")  # Set the default span option
-        span_menu = ttk.Combobox(
-            ui_frame, textvariable=self.span_var, values=span_options, state="readonly"
-        )
-        span_menu.pack(side=tk.TOP)
-
-        # Bind an event to update the x-axis span when a span option is selected
-        span_menu.bind("<<ComboboxSelected>>", self.update_x_axis_span)
-
-        # add a button to ignore bad bands
-        self.ignore_bad_bands_button = tk.Button(
-            ui_frame,
-            text="Ignore Bad Bands (Off)",
-            command=self.toggle_ignore_bad_bands,
-        )
-        self.ignore_bad_bands_button.pack(side=tk.TOP)
-
-        # add a button to correct 1µm offset
-        self.correct_offset_button = tk.Button(
-            ui_frame,
-            text="Correct 1µm Offset (Off)",
-            command=self.toggle_1um_offset_correction,
-        )
-        self.correct_offset_button.pack(side=tk.TOP)
-
-        # USGS LIBRAY SPECTRA
-        # add a drop down menu to plot library spectra, contents of the drop down menu are the library spectra located in the library_spectra folder
-        self.library_spectra_var = tk.StringVar(ui_frame)
-        self.library_spectra_var.set("None")  # default value
-        self.library_spectra_list = [
-            name.split("/")[-1] for name in self.usgs_spectra_folders
-        ]
-        # sort library_spectra_list alphabetically
-        self.library_spectra_list.sort()
-        # label the librar spectra drop down menu "library spectra"
-        self.library_spectra_label = tk.Label(ui_frame, text="USGS Library Spectra")
-        self.library_spectra_label.pack(side=tk.TOP)
-        # create the drop down menu
-        self.library_spectra_dropdown = tk.OptionMenu(
-            ui_frame,
-            self.library_spectra_var,
-            *self.library_spectra_list,
-            command=self.plot_library_spectra,
-        )
-        self.library_spectra_dropdown.pack(side=tk.TOP)
-
-        # MICA LIBRARY SPECTRA
-        # add a drop down menu to plot the library spectra, contents of the drop down menu are the library spectra located in the self.mica_library_spectra folder
-        self.mica_library_spectra_var = tk.StringVar(ui_frame)
-        self.mica_library_spectra_var.set("None")  # default value
-        self.mica_library_spectra_list = [
-            name.split(".")[0].split("/")[-1] for name in self.mica_spectra_names
-        ]
-        # sort mica_library_spectra_list alphabetically
-        self.mica_library_spectra_list.sort()
-        self.mica_library_spectra_label = tk.Label(
-            ui_frame, text="MICA Library Spectra"
-        )
-        self.mica_library_spectra_label.pack(side=tk.TOP)
-        # create the drop down menu
-        self.mica_library_spectra_dropdown = tk.OptionMenu(
-            ui_frame,
-            self.mica_library_spectra_var,
-            *self.mica_library_spectra_list,
-            command=self.plot_mica_library_spectra,
-        )
-        self.mica_library_spectra_dropdown.pack(side=tk.TOP)
-
-        # add a button to remove library spectra from the plot
-        self.remove_library_spectra_button = tk.Button(
-            ui_frame, text="Remove Library Spectra", command=self.remove_library_spectra
-        )
-        self.remove_library_spectra_button.pack(side=tk.TOP)
-
-        # add a button to collect the point and save it to a table
-        self.collect_point_button = tk.Button(
-            ui_frame, text="Collect Point", command=self.collect_point
-        )
-        self.collect_point_button.pack(side=tk.TOP)
-
-        # Create a toolbar for the spectral plot
-        toolbar = NavigationToolbar2Tk(self.spectral_canvas, self.spectral_window)
-        toolbar.update()
-        self.spectral_canvas.get_tk_widget().pack(
-            side=tk.TOP, fill=tk.BOTH, expand=True
-        )
-
-        # Add span selector for x-axis
-        self.create_x_axis_span_selector(self.left_wvl)
+        # Update backwards-compatibility references
+        self.spectral_window = active_plot.window
+        self.spectral_ax = active_plot._ax
+        self.spectral_canvas = active_plot._canvas
 
 
 class single_spectrum_window(SpectralCubeAnalysisTool):
