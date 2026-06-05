@@ -2597,6 +2597,30 @@ class SpectralCubeAnalysisTool:
         self.polygons_menu_row += 1
 
         # ----------------------------------------------------------------
+        # plot buttons that act on the currently selected table row (a
+        # mouse-friendly alternative to the middle-click context menu)
+        self.polygons_menu_col = 0
+        self.plot_spectrum_button = tk.Button(
+            ui_frame,
+            text="Plot Spectrum",
+            command=lambda: self.plot_selected_polygon(d=False),
+        )
+        self.plot_spectrum_button.grid(
+            row=self.polygons_menu_row, column=self.polygons_menu_col
+        )
+        self.polygons_menu_col += 1
+
+        self.plot_ratio_spectrum_button = tk.Button(
+            ui_frame,
+            text="Plot Ratio Spectrum",
+            command=lambda: self.plot_selected_polygon(d=True),
+        )
+        self.plot_ratio_spectrum_button.grid(
+            row=self.polygons_menu_row, column=self.polygons_menu_col
+        )
+        self.polygons_menu_row += 1
+
+        # ----------------------------------------------------------------
         # create a table to display polygon information
         self.create_polygons_table()
 
