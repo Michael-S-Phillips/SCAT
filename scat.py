@@ -2354,8 +2354,12 @@ class SpectralCubeAnalysisTool:
                 # Fallback if no CRS info
                 coordinate_text = f"X: {x_proj:.2f}, Y: {y_proj:.2f}"
 
+            # Update the (Tkinter) coordinate label only. This must NOT call
+            # self.left_canvas.draw(): a full canvas redraw re-rasterizes the
+            # entire hyperspectral image on every mouse-motion event, which is
+            # the dominant source of cursor lag (especially over a remote
+            # WSLg/RDP display, where each redraw ships a whole frame).
             self.coordinates_label.config(text=coordinate_text)
-            self.left_canvas.draw()
         if (
             self.draw_polygons
             and self.draw_poly_motion_flag
@@ -2365,10 +2369,12 @@ class SpectralCubeAnalysisTool:
             x, y = event.xdata, event.ydata
             self.current_polygon.append((x, y))
             point_color = self.polygon_color_var.get()
+            # draw_idle() coalesces rapid motion events into fewer real
+            # redraws instead of forcing a synchronous full render per point.
             self.left_ax.plot(x, y, color=point_color, marker=".")
-            self.left_canvas.draw()
+            self.left_canvas.draw_idle()
             self.right_ax.plot(x, y, color=point_color, marker=".")
-            self.right_canvas.draw()
+            self.right_canvas.draw_idle()
 
     def on_left_release(self, event):
         if hasattr(self, "left_data") and self.left_ax.in_axes(event):
