@@ -3389,13 +3389,26 @@ class SpectralCubeAnalysisTool:
             pass
 
     def plot_selected_polygon(self, d=None):
-        event = self.tmp_event
-        item = self.polygon_table.identify_row(event.y)
+        # Resolve the target row: prefer the current table selection (used by
+        # the Plot Spectrum / Plot Ratio Spectrum buttons), then fall back to
+        # the row under the last context-menu click (self.tmp_event).
+        item = None
+        selection = self.polygon_table.selection()
+        if selection:
+            item = selection[0]
+        elif getattr(self, "tmp_event", None) is not None:
+            item = self.polygon_table.identify_row(self.tmp_event.y)
+
+        if not item:
+            messagebox.showwarning(
+                "No polygon selected",
+                "Select a polygon row in the table first, then click the plot button.",
+            )
+            return
+
         pc_index = int(self.polygon_table.item(item, "values")[0])
         ssw = spectral_window  # single_spectrum_window
-        # ssw.create_window(app, pc_index) #old
         ssw.create_spectral_plot(app, pc_index, d=d)
-        # spec = self.polygon_spectra[pc_index]
 
     def clear_all_polygons(self):
         # Ask the user if they are sure
