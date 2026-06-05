@@ -3412,25 +3412,51 @@ class SpectralCubeAnalysisTool:
         else:
             pass
 
-    def plot_selected_polygon(self, d=None):
-        # Resolve the target row: prefer the current table selection (used by
-        # the Plot Spectrum / Plot Ratio Spectrum buttons), then fall back to
-        # the row under the last context-menu click (self.tmp_event).
-        item = None
+    def _selected_polygon_index(self):
+        """Return the polygon number of the active table row, or None.
+
+        Prefers self.polygon_to_highlight, the app's persistent "active
+        polygon" set when the user clicks a table row (which also highlights
+        the polygon on the image). The Treeview's own .selection() is
+        unreliable here because update_polygons_table() rebuilds every row,
+        which clears it; polygon_to_highlight survives that rebuild. Falls
+        back to the live selection, then to the last context-menu click.
+        """
+        candidates = []
+
+        # Authoritative: set by highlight_polygon on row click. Initialized to
+        # False, and polygon number 0 is valid, so test identity, not truth.
+        pth = self.polygon_to_highlight
+        if pth is not False and pth is not None:
+            candidates.append(int(pth))
+
+        # Live Treeview selection (set on the same click, before any rebuild).
         selection = self.polygon_table.selection()
         if selection:
-            item = selection[0]
-        elif getattr(self, "tmp_event", None) is not None:
-            item = self.polygon_table.identify_row(self.tmp_event.y)
+            candidates.append(int(self.polygon_table.item(selection[0], "values")[0]))
 
-        if not item:
+        # Last resort: the row under the most recent context-menu click.
+        if getattr(self, "tmp_event", None) is not None:
+            item = self.polygon_table.identify_row(self.tmp_event.y)
+            if item:
+                candidates.append(int(self.polygon_table.item(item, "values")[0]))
+
+        # Drop stale indices (e.g. a highlight left over after a deletion).
+        for idx in candidates:
+            if 0 <= idx < len(self.all_polygons):
+                return idx
+        return None
+
+    def plot_selected_polygon(self, d=None):
+        pc_index = self._selected_polygon_index()
+        if pc_index is None:
             messagebox.showwarning(
                 "No polygon selected",
-                "Select a polygon row in the table first, then click the plot button.",
+                "Click a polygon row in the table first (it will highlight on "
+                "the image), then click the plot button.",
             )
             return
 
-        pc_index = int(self.polygon_table.item(item, "values")[0])
         ssw = spectral_window  # single_spectrum_window
         ssw.create_spectral_plot(app, pc_index, d=d)
 
