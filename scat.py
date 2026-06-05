@@ -2688,8 +2688,14 @@ class SpectralCubeAnalysisTool:
             row=1, column=0, columnspan=len(self.polygon_table_header_labels)
         )
 
-        # Bind right-click to show the context menu
+        # Open the context menu on right-click (Button-3), middle-click
+        # (Button-2), and Ctrl+click. Multiple triggers because a true
+        # right-click is unreliable over some remote-desktop setups, and
+        # Button-2 (middle) is awkward on a laptop trackpad; Ctrl+click is
+        # the dependable fallback.
+        self.polygon_table.bind("<Button-3>", self.show_context_menu)
         self.polygon_table.bind("<Button-2>", self.show_context_menu)
+        self.polygon_table.bind("<Control-Button-1>", self.show_context_menu)
 
         # bind single-click to check a box
         self.polygon_table.bind("<Button-1>", self.check_a_box)
