@@ -131,6 +131,11 @@ _GEOMETRY_NAME_PATTERNS = (
     # Map-projected mosaic tile reflectance products → DDR companion.
     # e.g. t0886_mrral_05s058_0327_4 → t0886_mrrde_05s058_0327_4
     (re.compile(r'_mrr(al|if|ir|sr|su|ra)_', re.IGNORECASE), '_mrrde_'),
+    # Map-projected VRDR mosaic tile products → DDR companion.
+    # e.g. t1487_vrral_35n183_0654_1 → t1487_vrrde_35n183_0654_1
+    # (data codes seen: al, su, wv; match any vrr?? except the de
+    # geometry file itself so future codes are covered too).
+    (re.compile(r'_vrr(?!de_)[a-z]{2}_', re.IGNORECASE), '_vrrde_'),
     # Per-strip MTRDR products → input-geometry companion.
     # e.g. frt00003e12_07_if165j_mtr3 → frt00003e12_07_in165j_mtr3
     (re.compile(r'_(if|sr|su)(\d{3}[a-z])', re.IGNORECASE), r'_in\2'),
@@ -177,10 +182,16 @@ def _resolve_geometry_file(source_filename):
 # share the same Segment ID. Use Target ID for primary gating and
 # Segment ID only as a secondary gate within multi-segment targets.
 _BAND_ALIASES = {
+    # Listed most-specific first: _find_band_index tries them in this
+    # order. mrrde tiles carry both a VNIR and an IR Sample band, so the
+    # specific IR aliases must win there; the bare 'sample' fallback only
+    # fires for VNIR-only products (e.g. VRDR vrrde) whose lone column is
+    # named just 'Sample'.
     'ir_sample': (
         'ir (l-detector) sample',
         'ir sample',
         'l-detector sample',
+        'sample',
     ),
     'target_id': (
         'target id',
@@ -205,11 +216,16 @@ def _find_band_index(rio_image, kind):
     """
     aliases = _BAND_ALIASES.get(kind, ())
     descs = rio_image.descriptions or ()
-    for idx, desc in enumerate(descs, start=1):
-        if not desc:
-            continue
-        d = desc.strip().lower()
-        for alias in aliases:
+    lowered = [
+        (idx, desc.strip().lower())
+        for idx, desc in enumerate(descs, start=1)
+        if desc
+    ]
+    # Iterate aliases in priority order (most-specific first) so a generic
+    # fallback like 'sample' never preempts a more specific band that
+    # exists in the same file (e.g. mrrde's IR vs VNIR Sample bands).
+    for alias in aliases:
+        for idx, d in lowered:
             if alias in d:
                 return idx
     return None
